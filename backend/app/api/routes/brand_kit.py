@@ -18,7 +18,7 @@ from app.db.database import get_db
 from app.models.models import User, UserRole, BrandKit
 from app.schemas.schemas import BrandKitCreate, BrandKitOut, BrandKitUpdate, LogoUploadResponse
 from app.core.security import require_roles, get_current_user
-from app.services.storage import storage
+from app.services.storage import file_storage
 
 router = APIRouter(tags=["Brand Kit"])
 
@@ -47,7 +47,7 @@ async def upload_logo(
     ext = file.filename.rsplit(".", 1)[-1] if "." in file.filename else "png"
     filename = f"{user.company_id}_{uuid.uuid4().hex}.{ext}"
 
-    logo_url = await storage.save(
+    logo_url = await file_storage.save(
         file=file,
         subfolder="logos",
         filename=filename,

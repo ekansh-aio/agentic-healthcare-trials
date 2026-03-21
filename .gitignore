@@ -14,7 +14,6 @@ __pycache__/
 # Uploads & outputs (generated at runtime)
 backend/uploads/
 backend/outputs/
-backend/static/
 
 # Egg / dist
 *.egg-info/

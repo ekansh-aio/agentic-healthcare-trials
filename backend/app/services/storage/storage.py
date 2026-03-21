@@ -62,4 +62,4 @@ class LocalStorageBackend:
 # To swap to Azure Blob Storage, replace LocalStorageBackend() with
 # AzureBlobBackend() here. Nothing else in the codebase needs to change.
 
-storage = LocalStorageBackend()
+file_storage = LocalStorageBackend()

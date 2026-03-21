@@ -23,7 +23,7 @@ from app.schemas.schemas import (
     OnboardingRequest, OnboardingResponse, TrainingStatus, DocumentOut,
 )
 from app.core.security import hash_password, require_roles
-from app.services.storage import storage
+from app.services.storage import file_storage
 from app.services.training.trainer import TrainingService
 
 router = APIRouter(prefix="/onboarding", tags=["Onboarding"])
@@ -95,7 +95,7 @@ async def upload_document(
     """
     file_path = None
     if file:
-        file_path = await storage.save(
+        file_path = await file_storage.save(
             file=file,
             subfolder=f"docs/{user.company_id}",
             filename=file.filename,
