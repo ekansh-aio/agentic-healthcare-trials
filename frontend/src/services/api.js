@@ -208,6 +208,29 @@ export const adsAPI = {
       body: JSON.stringify(data),
     }),
 
+  // Upload a campaign-specific protocol document.
+  // Stored at uploads/docs/<company_id>/<ad_id>/<filename> — separate from company docs.
+  uploadDocument: async (adId, docType, title, file) => {
+    const token = localStorage.getItem("token");
+    const formData = new FormData();
+    formData.append("doc_type", docType);
+    formData.append("title", title);
+    formData.append("file", file);
+
+    const res = await fetch(`${API_BASE}/advertisements/${adId}/documents`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `Protocol document upload failed (HTTP ${res.status})`);
+    }
+    return res.json();
+  },
+
+  listDocuments: (adId) => request(`/advertisements/${adId}/documents`),
+
   generateStrategy: (adId) =>
     request(`/advertisements/${adId}/generate-strategy`, { method: "POST" }),
 

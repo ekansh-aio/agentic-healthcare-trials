@@ -101,6 +101,9 @@ class User(Base):
 
 
 # ─── Company Documents ────────────────────────────────────────────────────────
+# Global company-level documents: USP, compliance, policies, guidelines.
+# Shown in My Company page. Used by curator as baseline RAG context.
+# NOT linked to any specific advertisement.
 
 class CompanyDocument(Base):
     __tablename__ = "company_documents"
@@ -117,6 +120,28 @@ class CompanyDocument(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     company = relationship("Company", back_populates="documents")
+
+
+# ─── Advertisement Documents ──────────────────────────────────────────────────
+# Campaign-specific protocol documents: product descriptions, briefs, KPIs, etc.
+# Scoped to a single advertisement. Never shown on My Company page.
+# Loaded by the curator alongside CompanyDocuments, but with higher priority
+# so campaign-specific context wins over generic company context.
+# Stored at uploads/docs/<company_id>/<advertisement_id>/<filename>.
+
+class AdvertisementDocument(Base):
+    __tablename__ = "advertisement_documents"
+
+    id               = Column(String, primary_key=True, default=_uuid)
+    company_id       = Column(String, ForeignKey("companies.id"), nullable=False)
+    advertisement_id = Column(String, ForeignKey("advertisements.id"), nullable=False)
+    doc_type         = Column(String(64), nullable=False)   # plain string — campaign types are freeform
+    title            = Column(String(512), nullable=False)
+    file_path        = Column(String(1024), nullable=True)
+    priority         = Column(Integer, default=10)          # higher than CompanyDocument default of 0
+    created_at       = Column(DateTime, default=datetime.utcnow)
+
+    advertisement = relationship("Advertisement", back_populates="protocol_docs")
 
 
 # ─── Brand Kit ────────────────────────────────────────────────────────────────
@@ -172,7 +197,7 @@ class Advertisement(Base):
     id              = Column(String, primary_key=True, default=_uuid)
     company_id      = Column(String, ForeignKey("companies.id"), nullable=False)
     title           = Column(String(512), nullable=False)
-    ad_type         = Column(JSON, nullable=False)       # List[str]: supports multiple types
+    ad_type         = Column(JSON, nullable=False)
     status          = Column(Enum(AdStatus), default=AdStatus.DRAFT)
     budget          = Column(Float, nullable=True)
     platforms       = Column(JSON, nullable=True)
@@ -188,6 +213,7 @@ class Advertisement(Base):
     updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     company            = relationship("Company", back_populates="advertisements")
+    protocol_docs      = relationship("AdvertisementDocument", back_populates="advertisement", cascade="all, delete-orphan")
     reviews            = relationship("Review", back_populates="advertisement", cascade="all, delete-orphan")
     analytics          = relationship("AdAnalytics", back_populates="advertisement", cascade="all, delete-orphan")
     optimizer_logs     = relationship("OptimizerLog", back_populates="advertisement", cascade="all, delete-orphan")

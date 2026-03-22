@@ -105,6 +105,7 @@ class UserOut(BaseModel):
 
 
 # ─── Company Document Schemas ─────────────────────────────────────────────────
+# Global company-level documents. Shown in My Company page.
 
 class DocumentCreate(BaseModel):
     doc_type: DocumentTypeEnum
@@ -128,6 +129,23 @@ class DocumentUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     priority: Optional[int] = None
+
+
+# ─── Advertisement Document Schemas ──────────────────────────────────────────
+# Campaign-specific protocol documents. Never shown on My Company page.
+# doc_type is a plain string (freeform) — not constrained to DocumentTypeEnum.
+
+class AdvertisementDocumentOut(BaseModel):
+    id: str
+    advertisement_id: str
+    doc_type: str
+    title: str
+    file_path: Optional[str] = None
+    priority: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # ─── Brand Kit Schemas ────────────────────────────────────────────────────────

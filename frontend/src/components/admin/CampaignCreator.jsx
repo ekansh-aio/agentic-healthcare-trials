@@ -11,10 +11,9 @@
  * Protocol Documents:
  *  - Accepts PDF, DOCX, Markdown, TXT via drag-and-drop or file picker.
  *  - Each file gets an auto-inferred doc_type (editable by user).
- *  - Stored in form.protocol_docs as [{ file: File, doc_type: string }].
- *  - TODO (backend wiring): before calling generateStrategy, upload each file
- *    as a CompanyDocument with high priority so the curator treats them as
- *    campaign-specific RAG context alongside the persisted SkillConfig.
+ *  - After ad creation, each file is uploaded via POST /advertisements/{id}/documents.
+ *  - Stored at uploads/docs/<company_id>/<ad_id>/<filename> — separate from company docs.
+ *  - Priority 10 — curator treats these as higher-priority context than company docs (0).
  */
 
 import React, { useState } from "react";
@@ -25,10 +24,10 @@ import { Globe, Image, Bot, MessageSquare, Sparkles, FileText, X, Upload } from 
 
 // Accepted MIME types and their display labels
 const ACCEPTED_TYPES = {
-  "application/pdf":                                                  { ext: "PDF",  color: "#e74c3c" },
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": { ext: "DOCX", color: "#2980b9" },
-  "text/markdown":                                                    { ext: "MD",   color: "#8e44ad" },
-  "text/plain":                                                       { ext: "TXT",  color: "#27ae60" },
+  "application/pdf":                                                              { ext: "PDF",  color: "#e74c3c" },
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document":     { ext: "DOCX", color: "#2980b9" },
+  "text/markdown":                                                                { ext: "MD",   color: "#8e44ad" },
+  "text/plain":                                                                   { ext: "TXT",  color: "#27ae60" },
 };
 const ACCEPT_STRING = Object.keys(ACCEPTED_TYPES).join(",") + ",.md,.txt";
 
@@ -41,7 +40,6 @@ const DOC_TYPE_OPTIONS = [
   { value: "other",                 label: "Other" },
 ];
 
-/** Infer doc_type from filename as a convenience default */
 function inferDocType(filename) {
   const lower = filename.toLowerCase();
   if (lower.includes("product") || lower.includes("service") || lower.includes("usp")) return "product_description";
@@ -58,7 +56,19 @@ function formatBytes(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
-/** Single protocol document row */
+function extractErrorMessage(err) {
+  if (!err) return "An unknown error occurred.";
+  if (typeof err === "string") return err;
+  if (err.detail) {
+    if (Array.isArray(err.detail)) {
+      return err.detail.map((d) => `${d.loc?.join(" → ") ?? ""}: ${d.msg}`).join("\n");
+    }
+    return String(err.detail);
+  }
+  if (err.message && typeof err.message === "string") return err.message;
+  try { return JSON.stringify(err, null, 2); } catch { return String(err); }
+}
+
 function ProtocolDocRow({ doc, index, onChange, onRemove }) {
   const typeInfo = ACCEPTED_TYPES[doc.file.type] ?? { ext: "FILE", color: "#7f8c8d" };
   return (
@@ -68,7 +78,6 @@ function ProtocolDocRow({ doc, index, onChange, onRemove }) {
       border: "1px solid var(--color-card-border)",
       backgroundColor: "var(--color-card-bg)",
     }}>
-      {/* Type badge */}
       <span style={{
         fontSize: "0.65rem", fontWeight: 700, padding: "2px 6px",
         borderRadius: "4px", backgroundColor: typeInfo.color + "22",
@@ -77,7 +86,6 @@ function ProtocolDocRow({ doc, index, onChange, onRemove }) {
         {typeInfo.ext}
       </span>
 
-      {/* File name + size */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{
           fontSize: "0.8rem", fontWeight: 600, color: "var(--color-input-text)",
@@ -90,7 +98,6 @@ function ProtocolDocRow({ doc, index, onChange, onRemove }) {
         </p>
       </div>
 
-      {/* Doc type selector */}
       <select
         value={doc.doc_type}
         onChange={(e) => onChange(index, "doc_type", e.target.value)}
@@ -107,7 +114,6 @@ function ProtocolDocRow({ doc, index, onChange, onRemove }) {
         ))}
       </select>
 
-      {/* Remove */}
       <button
         onClick={() => onRemove(index)}
         style={{
@@ -123,38 +129,23 @@ function ProtocolDocRow({ doc, index, onChange, onRemove }) {
   );
 }
 
-/** Drop zone + file list for protocol documents */
 function ProtocolDocsSection({ docs, onAdd, onChange, onRemove }) {
   const [dragging, setDragging] = React.useState(false);
 
   const processFiles = (fileList) => {
     const incoming = Array.from(fileList).filter((f) => {
-      // Accept by MIME or by extension fallback for .md
       if (ACCEPTED_TYPES[f.type]) return true;
       if (f.name.endsWith(".md") || f.name.endsWith(".txt")) return true;
       return false;
     });
-    const newDocs = incoming.map((file) => ({
-      file,
-      doc_type: inferDocType(file.name),
-    }));
-    onAdd(newDocs);
+    onAdd(incoming.map((file) => ({ file, doc_type: inferDocType(file.name) })));
   };
 
-  const onDrop = (e) => {
-    e.preventDefault();
-    setDragging(false);
-    processFiles(e.dataTransfer.files);
-  };
-
-  const onInputChange = (e) => {
-    processFiles(e.target.files);
-    e.target.value = ""; // reset so same file can be re-added after removal
-  };
+  const onDrop = (e) => { e.preventDefault(); setDragging(false); processFiles(e.dataTransfer.files); };
+  const onInputChange = (e) => { processFiles(e.target.files); e.target.value = ""; };
 
   return (
     <div className="space-y-3">
-      {/* Drop zone */}
       <label
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
@@ -168,13 +159,7 @@ function ProtocolDocsSection({ docs, onAdd, onChange, onRemove }) {
           cursor: "pointer", transition: "border-color 0.15s, background-color 0.15s",
         }}
       >
-        <input
-          type="file"
-          multiple
-          accept={ACCEPT_STRING}
-          onChange={onInputChange}
-          style={{ display: "none" }}
-        />
+        <input type="file" multiple accept={ACCEPT_STRING} onChange={onInputChange} style={{ display: "none" }} />
         <Upload size={22} style={{ color: dragging ? "var(--color-accent)" : "var(--color-sidebar-text)" }} />
         <p style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--color-input-text)", textAlign: "center" }}>
           Drag & drop files here, or <span style={{ color: "var(--color-accent)", textDecoration: "underline" }}>browse</span>
@@ -184,17 +169,10 @@ function ProtocolDocsSection({ docs, onAdd, onChange, onRemove }) {
         </p>
       </label>
 
-      {/* File list */}
       {docs.length > 0 && (
         <div className="space-y-2">
           {docs.map((doc, i) => (
-            <ProtocolDocRow
-              key={i}
-              doc={doc}
-              index={i}
-              onChange={onChange}
-              onRemove={onRemove}
-            />
+            <ProtocolDocRow key={i} doc={doc} index={i} onChange={onChange} onRemove={onRemove} />
           ))}
         </div>
       )}
@@ -202,35 +180,21 @@ function ProtocolDocsSection({ docs, onAdd, onChange, onRemove }) {
   );
 }
 
-/** Extracts a human-readable message from any thrown value.
- *  Handles: Error instances, FastAPI {detail: string|[...]}, plain objects, strings. */
-function extractErrorMessage(err) {
-  if (!err) return "An unknown error occurred.";
-  if (typeof err === "string") return err;
-  if (err.detail) {
-    if (Array.isArray(err.detail)) {
-      return err.detail.map((d) => `${d.loc?.join(" → ") ?? ""}: ${d.msg}`).join("\n");
-    }
-    return String(err.detail);
-  }
-  if (err.message && typeof err.message === "string") return err.message;
-  try { return JSON.stringify(err, null, 2); } catch { return String(err); }
-}
-
 const AD_TYPES = [
-  { value: "website",  label: "Website",        icon: Globe,         desc: "AI-generated marketing website" },
-  { value: "ads",      label: "Advertisements",  icon: Image,         desc: "Display, social, and search ads" },
-  { value: "voicebot", label: "Voicebot",         icon: Bot,           desc: "Voice-based conversational agent", requiresWebsite: true },
-  { value: "chatbot",  label: "Chatbot",          icon: MessageSquare, desc: "Text-based conversational agent", requiresWebsite: true },
+  { value: "website",  label: "Website",       icon: Globe,         desc: "AI-generated marketing website" },
+  { value: "ads",      label: "Advertisements", icon: Image,         desc: "Display, social, and search ads" },
+  { value: "voicebot", label: "Voicebot",        icon: Bot,           desc: "Voice-based conversational agent", requiresWebsite: true },
+  { value: "chatbot",  label: "Chatbot",         icon: MessageSquare, desc: "Text-based conversational agent", requiresWebsite: true },
 ];
 
 const PLATFORMS = ["Google Ads", "Meta/Instagram", "LinkedIn", "Twitter/X", "YouTube", "TikTok", "Email"];
 
 export default function CampaignCreator() {
-  const navigate  = useNavigate();
+  const navigate    = useNavigate();
   const [loading,    setLoading]    = useState(false);
   const [generating, setGenerating] = useState(false);
   const [createdAd,  setCreatedAd]  = useState(null);
+  const [uploadProgress, setUploadProgress] = useState("");
 
   const [form, setForm] = useState({
     title: "",
@@ -238,10 +202,9 @@ export default function CampaignCreator() {
     budget: "",
     platforms: [],
     target_audience: { age_range: "", gender: "", interests: "" },
-    protocol_docs: [],   // [{ file: File, doc_type: string }]
+    protocol_docs: [],
   });
 
-  // Protocol docs helpers
   const addProtocolDocs   = (incoming) => setForm((p) => ({ ...p, protocol_docs: [...p.protocol_docs, ...incoming] }));
   const updateProtocolDoc = (idx, key, val) => setForm((p) => {
     const updated = [...p.protocol_docs];
@@ -258,20 +221,12 @@ export default function CampaignCreator() {
     if (locked) return;
     setForm((prev) => {
       const isSelected = prev.ad_types.includes(value);
-      // Deselecting website → also strip voicebot + chatbot
       if (value === "website" && isSelected) {
-        return {
-          ...prev,
-          ad_types: prev.ad_types.filter(
-            (x) => !["website", "voicebot", "chatbot"].includes(x)
-          ),
-        };
+        return { ...prev, ad_types: prev.ad_types.filter((x) => !["website", "voicebot", "chatbot"].includes(x)) };
       }
       return {
         ...prev,
-        ad_types: isSelected
-          ? prev.ad_types.filter((x) => x !== value)
-          : [...prev.ad_types, value],
+        ad_types: isSelected ? prev.ad_types.filter((x) => x !== value) : [...prev.ad_types, value],
       };
     });
   };
@@ -286,21 +241,33 @@ export default function CampaignCreator() {
   const handleCreate = async () => {
     setLoading(true);
     try {
+      // Step 1 — create the advertisement record
       const ad = await adsAPI.create({
         title:           form.title,
         ad_type:         form.ad_types,
         budget:          form.budget ? parseFloat(form.budget) : null,
         platforms:       form.platforms,
         target_audience: form.target_audience,
-        // TODO: when wiring to real API, upload each protocol_doc as a CompanyDocument
-        // (doc_type, title = file.name, content = extracted text) before calling generateStrategy.
-        // These docs get HIGH PRIORITY in the curator's RAG context alongside existing SkillConfig.
-        protocol_docs: form.protocol_docs.map((d) => ({ name: d.file.name, doc_type: d.doc_type, size: d.file.size })),
-        status:   "draft",
       });
+
+      // Step 2 — upload each protocol document scoped to this campaign
+      if (form.protocol_docs.length > 0) {
+        for (let i = 0; i < form.protocol_docs.length; i++) {
+          const { file, doc_type } = form.protocol_docs[i];
+          setUploadProgress(`Uploading document ${i + 1} of ${form.protocol_docs.length}…`);
+          const title = file.name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ").trim();
+          await adsAPI.uploadDocument(ad.id, doc_type, title, file);
+        }
+        setUploadProgress("");
+      }
+
       setCreatedAd(ad);
-    } catch (err) { alert("Campaign creation failed:\n\n" + extractErrorMessage(err)); }
-    finally { setLoading(false); }
+    } catch (err) {
+      setUploadProgress("");
+      alert("Campaign creation failed:\n\n" + extractErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleGenerate = async () => {
@@ -329,7 +296,6 @@ export default function CampaignCreator() {
       {!createdAd ? (
         <div className="space-y-6 max-w-3xl">
 
-          {/* Campaign Type */}
           <SectionCard
             title="Campaign Type"
             subtitle="Select one or more. Voicebot and Chatbot require Website first."
@@ -339,29 +305,22 @@ export default function CampaignCreator() {
                 const Icon   = t.icon;
                 const active = form.ad_types.includes(t.value);
                 const locked = !!t.requiresWebsite && !websiteSelected;
-
                 return (
                   <div
                     key={t.value}
                     onClick={() => toggleAdType(t.value, locked)}
                     style={{
-                      display:         "flex",
-                      alignItems:      "center",
-                      gap:             "12px",
-                      padding:         "16px",
-                      borderRadius:    "12px",
-                      border:          `2px solid ${active ? "var(--color-accent)" : "var(--color-card-border)"}`,
+                      display: "flex", alignItems: "center", gap: "12px",
+                      padding: "16px", borderRadius: "12px",
+                      border: `2px solid ${active ? "var(--color-accent)" : "var(--color-card-border)"}`,
                       backgroundColor: active ? "var(--color-accent-subtle)" : "var(--color-card-bg)",
-                      opacity:         locked ? 0.4 : 1,
-                      cursor:          locked ? "not-allowed" : "pointer",
-                      transition:      "border-color 0.15s, background-color 0.15s",
-                      userSelect:      "none",
+                      opacity: locked ? 0.4 : 1,
+                      cursor: locked ? "not-allowed" : "pointer",
+                      transition: "border-color 0.15s, background-color 0.15s",
+                      userSelect: "none",
                     }}
                   >
-                    <Icon
-                      size={24}
-                      style={{ color: active ? "var(--color-accent)" : "var(--color-sidebar-text)", flexShrink: 0 }}
-                    />
+                    <Icon size={24} style={{ color: active ? "var(--color-accent)" : "var(--color-sidebar-text)", flexShrink: 0 }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
                         <span style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--color-input-text)" }}>
@@ -371,17 +330,13 @@ export default function CampaignCreator() {
                           <span style={{
                             fontSize: "0.7rem", padding: "1px 6px", borderRadius: "4px",
                             backgroundColor: "var(--color-btn-ghost-bg)", color: "var(--color-sidebar-text)",
-                          }}>
-                            needs Website
-                          </span>
+                          }}>needs Website</span>
                         )}
                         {active && (
                           <span style={{
                             fontSize: "0.7rem", padding: "1px 6px", borderRadius: "4px",
                             backgroundColor: "var(--color-accent-subtle)", color: "var(--color-accent-text)",
-                          }}>
-                            ✓
-                          </span>
+                          }}>selected</span>
                         )}
                       </div>
                       <p style={{ fontSize: "0.75rem", marginTop: "2px", color: "var(--color-sidebar-text)" }}>
@@ -392,7 +347,6 @@ export default function CampaignCreator() {
                 );
               })}
             </div>
-
             {form.ad_types.length > 0 && (
               <p style={{ fontSize: "0.75rem", marginTop: "12px", fontWeight: 500, color: "var(--color-accent-text)" }}>
                 Selected: {form.ad_types.join(", ")}
@@ -400,7 +354,6 @@ export default function CampaignCreator() {
             )}
           </SectionCard>
 
-          {/* Campaign Details */}
           <SectionCard title="Campaign Details">
             <div className="space-y-4">
               <div>
@@ -429,7 +382,6 @@ export default function CampaignCreator() {
             </div>
           </SectionCard>
 
-          {/* Protocol Documents */}
           <SectionCard
             title="Protocol Documents"
             subtitle="Upload product/service descriptions, campaign requirements, targets, or any brief. The AI curator uses these as high-priority context when generating your strategy."
@@ -442,7 +394,6 @@ export default function CampaignCreator() {
             />
           </SectionCard>
 
-          {/* Target Platforms */}
           <SectionCard title="Target Platforms">
             <div className="flex flex-wrap gap-2">
               {PLATFORMS.map((p) => (
@@ -457,7 +408,6 @@ export default function CampaignCreator() {
             </div>
           </SectionCard>
 
-          {/* Target Audience */}
           <SectionCard title="Target Audience">
             <div className="grid grid-cols-3 gap-4">
               <input
@@ -481,12 +431,18 @@ export default function CampaignCreator() {
             </div>
           </SectionCard>
 
+          {uploadProgress && (
+            <p style={{ fontSize: "0.82rem", color: "var(--color-accent)", textAlign: "center" }}>
+              {uploadProgress}
+            </p>
+          )}
+
           <button
             onClick={handleCreate}
             disabled={loading || !form.title || form.ad_types.length === 0}
             className="btn--primary-full"
           >
-            {loading ? <><span className="spinner" /> Creating…</> : "Create Campaign"}
+            {loading ? <><span className="spinner" /> {uploadProgress || "Creating…"}</> : "Create Campaign"}
           </button>
         </div>
 
@@ -498,9 +454,9 @@ export default function CampaignCreator() {
               <Sparkles size={28} style={{ color: "var(--color-accent)" }} />
             </div>
             <p className="text-sm" style={{ color: "var(--color-sidebar-text)" }}>
-              Campaign created with: <strong>{createdAd.ad_types?.join(", ")}</strong>.
-              {createdAd.protocol_docs?.length > 0 && (
-                <> <strong>{createdAd.protocol_docs.length} protocol document{createdAd.protocol_docs.length > 1 ? "s" : ""}</strong> attached as AI context.</>
+              Campaign created with: <strong>{createdAd.ad_type?.join(", ")}</strong>.
+              {form.protocol_docs.length > 0 && (
+                <> <strong>{form.protocol_docs.length} protocol document{form.protocol_docs.length > 1 ? "s" : ""}</strong> attached as AI context.</>
               )}
               {" "}Generate an AI marketing strategy and submit for review?
             </p>
