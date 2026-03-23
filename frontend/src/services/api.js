@@ -1,7 +1,7 @@
 /**
  * Frontend API Service Layer
  * Owner: Frontend Dev 1
- * 
+ *
  * Centralized API calls. Each section maps to a backend module.
  * All functions return parsed JSON or throw errors.
  */
@@ -25,10 +25,8 @@ async function request(endpoint, options = {}) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    // FastAPI can return detail as a string OR an array of validation error objects
     let message;
     if (Array.isArray(err.detail)) {
-      // Pydantic validation errors: [{loc: [...], msg: "...", type: "..."}]
       message = err.detail
         .map((d) => {
           const field = Array.isArray(d.loc) ? d.loc.filter(x => x !== "body").join(" → ") : "";
@@ -46,6 +44,7 @@ async function request(endpoint, options = {}) {
 
 // ─── M2: Auth ────────────────────────────────────────────────────────────────
 
+// company and role are verified by the backend against the DB on every login.
 export const authAPI = {
   login: (email, password, company, role) =>
     request("/auth/login", {
@@ -63,25 +62,63 @@ export const onboardingAPI = {
       body: JSON.stringify(data),
     }),
 
+  uploadLogo: async (file) => {
+    const token = localStorage.getItem("token");
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch(`${API_BASE}/onboarding/logo`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `Logo upload failed (HTTP ${res.status})`);
+    }
+    return res.json();
+  },
+
   uploadDocument: async (docType, title, content, file) => {
     const token = localStorage.getItem("token");
     const formData = new FormData();
     formData.append("doc_type", docType);
     formData.append("title", title);
     if (content) formData.append("content", content);
-    if (file) formData.append("file", file);
+    if (file)    formData.append("file", file);
 
     const res = await fetch(`${API_BASE}/onboarding/documents`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` },
       body: formData,
     });
-    if (!res.ok) throw new Error("Upload failed");
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `Document upload failed (HTTP ${res.status})`);
+    }
     return res.json();
   },
 
   triggerTraining: () =>
     request("/onboarding/train", { method: "POST" }),
+};
+
+// ─── Brand Kit ───────────────────────────────────────────────────────────────
+
+export const brandKitAPI = {
+  create: (data) =>
+    request("/brand-kit/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  get: () => request("/brand-kit/"),
+
+  update: (data) =>
+    request("/brand-kit/", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
 };
 
 // ─── M2: Users ───────────────────────────────────────────────────────────────
@@ -110,6 +147,36 @@ export const documentsAPI = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  // Upload a document with a file attachment (multipart).
+  // Used by MyCompany "Add Document" — mirrors onboarding/documents.
+  upload: async (docType, title, file) => {
+    const token = localStorage.getItem("token");
+    const formData = new FormData();
+    formData.append("doc_type", docType);
+    formData.append("title", title);
+    formData.append("file", file);
+
+    const res = await fetch(`${API_BASE}/documents/upload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `Document upload failed (HTTP ${res.status})`);
+    }
+    return res.json();
+  },
+
+  // Returns the authenticated URL to stream the file for preview.
+  // Token is passed as a query param so the browser can load it directly
+  // in an iframe or anchor without needing a custom Authorization header.
+  // When storage moves to Azure Blob, this will return the SAS URL instead.
+  getFileUrl: (docId) => {
+    const token = localStorage.getItem("token");
+    return `${API_BASE}/documents/${docId}/file?token=${token}`;
+  },
 
   update: (docId, data) =>
     request(`/documents/${docId}`, {
@@ -140,6 +207,29 @@ export const adsAPI = {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
+
+  // Upload a campaign-specific protocol document.
+  // Stored at uploads/docs/<company_id>/<ad_id>/<filename> — separate from company docs.
+  uploadDocument: async (adId, docType, title, file) => {
+    const token = localStorage.getItem("token");
+    const formData = new FormData();
+    formData.append("doc_type", docType);
+    formData.append("title", title);
+    formData.append("file", file);
+
+    const res = await fetch(`${API_BASE}/advertisements/${adId}/documents`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || `Protocol document upload failed (HTTP ${res.status})`);
+    }
+    return res.json();
+  },
+
+  listDocuments: (adId) => request(`/advertisements/${adId}/documents`),
 
   generateStrategy: (adId) =>
     request(`/advertisements/${adId}/generate-strategy`, { method: "POST" }),

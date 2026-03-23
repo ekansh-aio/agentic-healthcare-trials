@@ -53,12 +53,15 @@ class DocumentTypeEnum(str, Enum):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    company: str
+    role: UserRoleEnum
 
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     role: UserRoleEnum
     company_id: str
+    company_name: str
     user_id: str
 
 
@@ -76,6 +79,9 @@ class OnboardingResponse(BaseModel):
     company_id: str
     admin_user_id: str
     message: str = "Company onboarded successfully"
+
+class LogoUploadResponse(BaseModel):
+    logo_url: str
 
 
 # ─── User Schemas ─────────────────────────────────────────────────────────────
@@ -99,6 +105,7 @@ class UserOut(BaseModel):
 
 
 # ─── Company Document Schemas ─────────────────────────────────────────────────
+# Global company-level documents. Shown in My Company page.
 
 class DocumentCreate(BaseModel):
     doc_type: DocumentTypeEnum
@@ -110,6 +117,7 @@ class DocumentOut(BaseModel):
     doc_type: str
     title: str
     content: Optional[str] = None
+    file_path: Optional[str] = None
     priority: int
     version: int
     updated_at: datetime
@@ -121,6 +129,67 @@ class DocumentUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     priority: Optional[int] = None
+
+
+# ─── Advertisement Document Schemas ──────────────────────────────────────────
+# Campaign-specific protocol documents. Never shown on My Company page.
+# doc_type is a plain string (freeform) — not constrained to DocumentTypeEnum.
+
+class AdvertisementDocumentOut(BaseModel):
+    id: str
+    advertisement_id: str
+    doc_type: str
+    title: str
+    file_path: Optional[str] = None
+    priority: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ─── Brand Kit Schemas ────────────────────────────────────────────────────────
+
+class BrandKitCreate(BaseModel):
+    primary_color: Optional[str] = None
+    secondary_color: Optional[str] = None
+    accent_color: Optional[str] = None
+    primary_font: Optional[str] = None
+    secondary_font: Optional[str] = None
+    adjectives: Optional[str] = None
+    dos: Optional[str] = None
+    donts: Optional[str] = None
+    preset_name: Optional[str] = None
+
+class BrandKitOut(BaseModel):
+    id: str
+    company_id: str
+    primary_color: Optional[str] = None
+    secondary_color: Optional[str] = None
+    accent_color: Optional[str] = None
+    primary_font: Optional[str] = None
+    secondary_font: Optional[str] = None
+    adjectives: Optional[str] = None
+    dos: Optional[str] = None
+    donts: Optional[str] = None
+    preset_name: Optional[str] = None
+    pdf_path: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class BrandKitUpdate(BaseModel):
+    primary_color: Optional[str] = None
+    secondary_color: Optional[str] = None
+    accent_color: Optional[str] = None
+    primary_font: Optional[str] = None
+    secondary_font: Optional[str] = None
+    adjectives: Optional[str] = None
+    dos: Optional[str] = None
+    donts: Optional[str] = None
+    preset_name: Optional[str] = None
 
 
 # ─── Advertisement Schemas ────────────────────────────────────────────────────

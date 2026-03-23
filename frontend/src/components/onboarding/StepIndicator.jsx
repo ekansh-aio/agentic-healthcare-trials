@@ -1,6 +1,6 @@
 import React from "react";
 import { Check } from "lucide-react";
-import { STEPS } from "./constants";
+import { STEPS } from "./Constants";
 
 /**
  * StepIndicator

@@ -1,6 +1,6 @@
 /**
  * App Entry — Routing Configuration
- * 
+ *
  * All routes are role-protected. Each dashboard module is loaded independently.
  */
 
@@ -16,6 +16,7 @@ import OnboardingPage from "./components/onboarding/OnboardingPage";
 // Admin
 import AdminDashboard from "./components/admin/AdminDashboard";
 import CampaignCreator from "./components/admin/CampaignCreator";
+import CampaignDetailPage from "./components/admin/CampaignDetailPage";
 import UserManagement from "./components/admin/UserManagement";
 import MyCompany from "./components/admin/MyCompany";
 
@@ -30,6 +31,8 @@ import PublisherDashboard from "./components/publisher/PublisherDashboard";
 
 // Analytics (shared)
 import AnalyticsPage from "./components/analytics/AnalyticsPage";
+
+const ALL_ROLES = ["admin", "reviewer", "ethics_reviewer", "publisher"];
 
 function AppRoutes() {
   const { isAuthenticated, role } = useAuth();
@@ -46,6 +49,9 @@ function AppRoutes() {
       <Route path="/admin/users" element={<ProtectedRoute allowedRoles={["admin"]}><UserManagement /></ProtectedRoute>} />
       <Route path="/admin/company" element={<ProtectedRoute allowedRoles={["admin"]}><MyCompany /></ProtectedRoute>} />
       <Route path="/admin/analytics" element={<ProtectedRoute allowedRoles={["admin"]}><AnalyticsPage /></ProtectedRoute>} />
+
+      {/* Campaign detail — accessible by all roles since reviewer/publisher/ethics also need it */}
+      <Route path="/admin/campaign/:id" element={<ProtectedRoute allowedRoles={ALL_ROLES}><CampaignDetailPage /></ProtectedRoute>} />
 
       {/* Reviewer routes */}
       <Route path="/reviewer" element={<ProtectedRoute allowedRoles={["reviewer"]}><ReviewerDashboard /></ProtectedRoute>} />

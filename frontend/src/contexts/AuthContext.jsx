@@ -1,7 +1,7 @@
 /**
  * Auth Context
  * Owner: Frontend Dev 1
- * 
+ *
  * Provides authentication state, role-based routing,
  * and company context to the entire application.
  */
@@ -29,19 +29,27 @@ export function AuthProvider({ children }) {
     setLoading(false);
   }, []);
 
-  const login = useCallback(async (email, password , company, role) => {
+  const login = useCallback(async (email, password, company, role) => {
     const data = await authAPI.login(email, password, company, role);
     const userData = {
       id: data.user_id,
       role: data.role,
       companyId: data.company_id,
-      companyName: data.companyName,
+      companyName: data.company_name,
       token: data.access_token,
     };
     localStorage.setItem("token", data.access_token);
     localStorage.setItem("user", JSON.stringify(userData));
     setUser(userData);
     return userData;
+  }, []);
+
+  // Used by OnboardingPage after registration + login to hydrate the context
+  // without making a second network call.
+  const hydrateUser = useCallback((userData) => {
+    localStorage.setItem("token", userData.token);
+    localStorage.setItem("user", JSON.stringify(userData));
+    setUser(userData);
   }, []);
 
   const logout = useCallback(() => {
@@ -54,10 +62,11 @@ export function AuthProvider({ children }) {
     loading,
     login,
     logout,
+    hydrateUser,
     isAuthenticated: !!user,
     role: user?.role,
     companyId: user?.companyId,
-    companyName: user?.companyName
+    companyName: user?.companyName,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

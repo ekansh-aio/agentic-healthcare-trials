@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { Upload, X } from "lucide-react";
 
 /**
@@ -6,21 +6,24 @@ import { Upload, X } from "lucide-react";
  * Collects company name, industry, and optional logo upload.
  *
  * Props:
- *   form         {object}   — shared form state { company_name, industry, … }
- *   updateForm   {function} — (key, value) => void
- *   onNext       {function} — advance to step 1
- *   setError     {function} — surface errors to parent
+ *   form         {object}    — shared form state { company_name, industry }
+ *   updateForm   {function}  — (key, value) => void
+ *   logoFile     {File|null} — lifted to OnboardingPage so handleTrain can upload it
+ *   setLogoFile  {function}  — (File|null) => void
+ *   onNext       {function}  — advance to step 1
+ *   setError     {function}  — surface errors to parent
  */
-export default function CompanyInfoStep({ form, updateForm, onNext, setError }) {
-  const logoInputRef              = useRef(null);
-  const [logoFile,    setLogoFile]    = React.useState(null);
-  const [logoPreview, setLogoPreview] = React.useState(null);
+export default function CompanyInfoStep({ form, updateForm, logoFile, setLogoFile, onNext, setError }) {
+  const logoInputRef = useRef(null);
+
+  // logoPreview is UI-only state — derived from logoFile, not needed by parent
+  const [logoPreview, setLogoPreview] = useState(null);
 
   const handleLogoChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (!["image/jpeg", "image/png", "image/jpg"].includes(file.type)) {
-      setError("Logo must be a JPEG or PNG file.");
+    if (!["image/jpeg", "image/png", "image/jpg", "image/svg+xml"].includes(file.type)) {
+      setError("Logo must be a JPEG, PNG, or SVG file.");
       return;
     }
     setLogoFile(file);
@@ -70,7 +73,7 @@ export default function CompanyInfoStep({ form, updateForm, onNext, setError }) 
           >
             <Upload size={24} style={{ color: "var(--color-sidebar-text)" }} />
             <span className="text-sm" style={{ color: "var(--color-sidebar-text)" }}>
-              Click to upload JPEG or PNG
+              Click to upload JPEG, PNG, or SVG
             </span>
           </button>
         ) : (
@@ -96,7 +99,7 @@ export default function CompanyInfoStep({ form, updateForm, onNext, setError }) 
         <input
           ref={logoInputRef}
           type="file"
-          accept="image/jpeg,image/jpg,image/png"
+          accept="image/jpeg,image/jpg,image/png,image/svg+xml"
           onChange={handleLogoChange}
           className="hidden"
         />
