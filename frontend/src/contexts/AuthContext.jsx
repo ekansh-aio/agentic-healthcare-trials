@@ -51,6 +51,7 @@ export function AuthProvider({ children }) {
       role: data.role,
       companyId: data.company_id,
       companyName: data.company_name,
+      companyIndustry: data.company_industry || null,
       token: data.access_token,
     };
     localStorage.setItem("token", data.access_token);
@@ -92,6 +93,7 @@ export function AuthProvider({ children }) {
     role: user?.role,
     companyId: user?.companyId,
     companyName: user?.companyName,
+    companyIndustry: user?.companyIndustry || null,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

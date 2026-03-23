@@ -62,6 +62,7 @@ class TokenResponse(BaseModel):
     role: UserRoleEnum
     company_id: str
     company_name: str
+    company_industry: Optional[str] = None
     user_id: str
 
 

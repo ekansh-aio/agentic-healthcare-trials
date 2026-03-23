@@ -72,5 +72,6 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
         role=user.role.value,
         company_id=user.company_id,
         company_name=company.name,
+        company_industry=company.industry,
         user_id=user.id,
     )

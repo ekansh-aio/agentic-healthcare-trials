@@ -478,7 +478,7 @@ function BrandKitPanel() {
   const [error,          setError]          = useState("");
   const brandPdfRef = useRef(null);
   const [brandPdfFile, setBrandPdfFile] = useState(null);
-  const { user } = useAuth();
+  const { user, companyIndustry } = useAuth();
 
   // Fetch current brand kit on mount
   useEffect(() => {
@@ -507,10 +507,10 @@ function BrandKitPanel() {
       });
   }, []);
 
-  // Derive industry from company name to match presets — fallback to Technology
+  // Match company industry to a preset group — fallback to Technology
   const industryPresets = (() => {
     const key = Object.keys(BRAND_PRESETS).find(
-      (k) => user?.companyName?.toLowerCase().includes(k.toLowerCase())
+      (k) => companyIndustry?.toLowerCase().includes(k.toLowerCase())
     );
     return key ? BRAND_PRESETS[key] : DEFAULT_PRESETS;
   })();

@@ -142,11 +142,12 @@ export default function OnboardingPage() {
 
       // 4. Hydrate AuthContext so ProtectedRoute allows the /admin redirect.
       hydrateUser({
-        id:          loginRes.user_id,
-        role:        loginRes.role,
-        companyId:   loginRes.company_id,
-        companyName: loginRes.company_name,
-        token:       loginRes.access_token,
+        id:              loginRes.user_id,
+        role:            loginRes.role,
+        companyId:       loginRes.company_id,
+        companyName:     loginRes.company_name,
+        companyIndustry: form.industry || null,
+        token:           loginRes.access_token,
       });
 
       // 5. Upload logo — token is now in localStorage so auth header is set.
