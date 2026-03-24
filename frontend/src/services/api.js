@@ -39,6 +39,7 @@ async function request(endpoint, options = {}) {
     throw new Error(message);
   }
 
+  if (res.status === 204 || res.headers.get("content-length") === "0") return null;
   return res.json();
 }
 
@@ -256,6 +257,23 @@ export const adsAPI = {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
+
+  generateWebsite: (adId) =>
+    request(`/advertisements/${adId}/generate-website`, { method: "POST" }),
+
+  // Returns URL strings (not API calls) — used for preview/download <a> hrefs.
+  // Token passed as query param so the browser can open them directly.
+  websitePreviewUrl: (adId) => {
+    const token = localStorage.getItem("token");
+    return `/api/advertisements/${adId}/website?token=${token}`;
+  },
+  websiteDownloadUrl: (adId) => {
+    const token = localStorage.getItem("token");
+    return `/api/advertisements/${adId}/website?download=true&token=${token}`;
+  },
+
+  delete: (adId) =>
+    request(`/advertisements/${adId}`, { method: "DELETE" }),
 };
 
 // ─── M7/M15: Analytics ───────────────────────────────────────────────────────

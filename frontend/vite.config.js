@@ -8,8 +8,14 @@ export default defineConfig({
     host: true,   // bind to 0.0.0.0 — required for Docker port forwarding
     proxy: {
       "/api": {
-        // Docker: VITE_PROXY_TARGET=http://backend:8000 (Docker internal DNS)
-        // Local:  falls back to 127.0.0.1:8000
+        target: process.env.VITE_PROXY_TARGET || "http://127.0.0.1:8000",
+        changeOrigin: true,
+      },
+      "/outputs": {
+        target: process.env.VITE_PROXY_TARGET || "http://127.0.0.1:8000",
+        changeOrigin: true,
+      },
+      "/uploads": {
         target: process.env.VITE_PROXY_TARGET || "http://127.0.0.1:8000",
         changeOrigin: true,
       },

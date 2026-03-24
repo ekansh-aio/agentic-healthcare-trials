@@ -21,7 +21,7 @@ from typing import List, Optional
 from app.db.database import get_db
 from app.models.models import (
     User, UserRole, Advertisement, AdStatus, Review,
-    CompanyDocument, AdvertisementDocument,
+    CompanyDocument, AdvertisementDocument, BrandKit, Company,
 )
 from app.schemas.schemas import (
     AdvertisementCreate, AdvertisementOut, AdvertisementUpdate,
@@ -385,6 +385,140 @@ async def generate_creatives(
 
 
 # ─── Bot Configuration ────────────────────────────────────────────────────────
+
+async def _user_from_query_token_ads(
+    token: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Auth via ?token= for browser-opened URLs (same as documents.py pattern)."""
+    from app.core.security import decode_token
+    payload = decode_token(token)
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+    return user
+
+
+@router.get("/{ad_id}/website")
+async def serve_website(
+    ad_id: str,
+    download: bool = False,
+    user: User = Depends(_user_from_query_token_ads),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Serve the generated HTML landing page.
+    ?download=true → Content-Disposition: attachment (triggers browser download).
+    Accessible via the existing /api proxy — no separate /outputs proxy needed.
+    """
+    from fastapi.responses import HTMLResponse, Response
+    import os as _os
+
+    result = await db.execute(
+        select(Advertisement).where(
+            Advertisement.id == ad_id,
+            Advertisement.company_id == user.company_id,
+        )
+    )
+    ad = result.scalar_one_or_none()
+    if not ad:
+        raise HTTPException(status_code=404, detail="Advertisement not found")
+    if not ad.output_url:
+        raise HTTPException(status_code=404, detail="No website has been generated for this campaign yet")
+
+    # output_url is "/outputs/<company_id>/<ad_id>/website/index.html"
+    # Strip the leading "/outputs/" and resolve against OUTPUT_DIR
+    from app.core.config import settings as _s
+    relative  = ad.output_url.lstrip("/").removeprefix("outputs/")
+    disk_path = _os.path.join(_s.OUTPUT_DIR, relative)
+
+    if not _os.path.exists(disk_path):
+        raise HTTPException(status_code=404, detail="Website file not found on disk")
+
+    with open(disk_path, "r", encoding="utf-8") as f:
+        html_content = f.read()
+
+    if download:
+        return Response(
+            content=html_content,
+            media_type="text/html",
+            headers={"Content-Disposition": 'attachment; filename="landing-page.html"'},
+        )
+    return HTMLResponse(content=html_content)
+
+
+@router.post("/{ad_id}/generate-website", response_model=AdvertisementOut)
+async def generate_website(
+    ad_id: str,
+    user: User = Depends(require_roles([UserRole.ADMIN, UserRole.PUBLISHER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Generate a static HTML landing page from the campaign's marketing strategy,
+    reviewer website requirements, and company brand kit.
+
+    Available once the campaign is approved or published.
+    Saved to outputs/<company_id>/<ad_id>/website/index.html.
+    URL stored in ad.output_url.
+    """
+    result = await db.execute(
+        select(Advertisement).where(
+            Advertisement.id == ad_id,
+            Advertisement.company_id == user.company_id,
+        )
+    )
+    ad = result.scalar_one_or_none()
+    if not ad:
+        raise HTTPException(status_code=404, detail="Advertisement not found")
+    if ad.status not in (AdStatus.APPROVED, AdStatus.PUBLISHED):
+        raise HTTPException(
+            status_code=400,
+            detail="Website can only be generated for approved or published campaigns.",
+        )
+
+    brand_kit_result = await db.execute(
+        select(BrandKit).where(BrandKit.company_id == user.company_id)
+    )
+    brand_kit = brand_kit_result.scalar_one_or_none()
+
+    company_result = await db.execute(
+        select(Company).where(Company.id == user.company_id)
+    )
+    company = company_result.scalar_one_or_none()
+
+    from app.services.ai.website_agent import WebsiteAgentService
+    svc = WebsiteAgentService(company_id=user.company_id)
+    try:
+        url = await svc.generate_website(ad, brand_kit, company)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    ad.output_url = url
+    return ad
+
+
+@router.delete("/{ad_id}", status_code=204)
+async def delete_advertisement(
+    ad_id: str,
+    user: User = Depends(require_roles([UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently delete a campaign and all its related data. Admin only."""
+    result = await db.execute(
+        select(Advertisement).where(
+            Advertisement.id == ad_id,
+            Advertisement.company_id == user.company_id,
+        )
+    )
+    ad = result.scalar_one_or_none()
+    if not ad:
+        raise HTTPException(status_code=404, detail="Advertisement not found")
+    await db.delete(ad)
+
 
 @router.patch("/{ad_id}/bot-config", response_model=AdvertisementOut)
 async def update_bot_config(

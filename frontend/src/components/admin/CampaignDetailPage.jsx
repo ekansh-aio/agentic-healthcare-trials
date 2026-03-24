@@ -29,7 +29,7 @@ import {
   FileText, CheckCircle2, AlertCircle, ChevronDown, ChevronUp,
   Loader2, Target, DollarSign, Users, Layers, Zap, BarChart2,
   MessageCircle, Send, ThumbsUp, ThumbsDown, RefreshCw, Sparkles,
-  Download, Eye,
+  Download, Eye, Trash2,
 } from "lucide-react";
 
 // ─── Status lifecycle ─────────────────────────────────────────────────────────
@@ -638,6 +638,12 @@ export default function CampaignDetailPage() {
   const [pubError,    setPubError]    = useState(null);
   const [creativeLoading, setCreativeLoading] = useState(false);
   const [creativeError,   setCreativeError]   = useState(null);
+  const [deleteLoading,   setDeleteLoading]   = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [websiteLoading,  setWebsiteLoading]  = useState(false);
+  const [websiteError,    setWebsiteError]    = useState(null);
+
+  const role = JSON.parse(localStorage.getItem("user") || "{}").role;
 
   const load = useCallback(async () => {
     try {
@@ -711,6 +717,30 @@ export default function CampaignDetailPage() {
     }
   };
 
+  const handleGenerateWebsite = async () => {
+    setWebsiteLoading(true); setWebsiteError(null);
+    try {
+      const updated = await adsAPI.generateWebsite(id);
+      setAd(updated);
+    } catch (err) {
+      setWebsiteError(err.message || "Website generation failed.");
+    } finally {
+      setWebsiteLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleteLoading(true);
+    try {
+      await adsAPI.delete(id);
+      navigate("/admin/dashboard");
+    } catch (err) {
+      setShowDeleteConfirm(false);
+      setDeleteLoading(false);
+      alert(err.message || "Failed to delete campaign.");
+    }
+  };
+
   // ── Derived state ────────────────────────────────────────────────────────
   const currentStep = ad ? statusIndex(ad.status) : 0;
   const hasStrategy = ad && currentStep >= statusIndex("strategy_created");
@@ -755,8 +785,69 @@ export default function CampaignDetailPage() {
             <p className="page-header__subtitle">Created {new Date(ad.created_at).toLocaleDateString()}</p>
           </div>
         </div>
-        <CampaignStatusBadge status={ad.status} />
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <CampaignStatusBadge status={ad.status} />
+          {role === "admin" && (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              title="Delete campaign"
+              style={{
+                background: "none", border: "1px solid #ef4444", borderRadius: "8px",
+                cursor: "pointer", display: "flex", alignItems: "center", gap: "5px",
+                padding: "6px 12px", color: "#ef4444", fontSize: "0.8rem", fontWeight: 500,
+              }}
+            >
+              <Trash2 size={14} /> Delete
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Delete confirmation modal */}
+      {showDeleteConfirm && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 1000,
+          backgroundColor: "rgba(0,0,0,0.5)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: "var(--color-card-bg)", border: "1px solid var(--color-card-border)",
+            borderRadius: "14px", padding: "28px 32px", maxWidth: "400px", width: "90%",
+          }}>
+            <h3 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--color-input-text)", marginBottom: "8px" }}>
+              Delete Campaign?
+            </h3>
+            <p style={{ fontSize: "0.85rem", color: "var(--color-sidebar-text)", marginBottom: "24px", lineHeight: 1.6 }}>
+              This will permanently delete <strong style={{ color: "var(--color-input-text)" }}>{ad.title}</strong> and all
+              its documents, reviews, and analytics. This action cannot be undone.
+            </p>
+            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleteLoading}
+                className="btn--ghost"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleteLoading}
+                style={{
+                  background: "#ef4444", color: "#fff", border: "none",
+                  borderRadius: "8px", padding: "8px 18px", cursor: "pointer",
+                  fontWeight: 600, fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "6px",
+                  opacity: deleteLoading ? 0.7 : 1,
+                }}
+              >
+                {deleteLoading
+                  ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+                  : <Trash2 size={14} />}
+                Delete Campaign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-6">
 
@@ -985,6 +1076,87 @@ export default function CampaignDetailPage() {
             </div>
             {ad.output_files?.length > 0 && (
               <CreativesViewer creatives={ad.output_files} />
+            )}
+          </SectionCard>
+        )}
+
+        {/* ── Generate Website ──────────────────────────────────────────────── */}
+        {(ad.status === "approved" || ad.status === "published") && ad.ad_type?.includes("website") && (
+          <SectionCard
+            title="Generate Landing Page"
+            subtitle="Claude builds a complete, brand-styled HTML page from your strategy and website requirements"
+          >
+            {websiteError && (
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "10px", padding: "12px 14px", borderRadius: "8px", backgroundColor: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", marginBottom: "16px" }}>
+                <AlertCircle size={14} style={{ color: "#ef4444", flexShrink: 0, marginTop: "2px" }} />
+                <p style={{ fontSize: "0.82rem", color: "#ef4444", lineHeight: 1.5 }}>{websiteError}</p>
+              </div>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: ad.output_url ? "20px" : 0 }}>
+              <ActionButton
+                onClick={handleGenerateWebsite}
+                loading={websiteLoading}
+                icon={<Globe size={14} />}
+              >
+                {websiteLoading
+                  ? "Generating page… (30–60s)"
+                  : ad.output_url
+                    ? "Regenerate Website"
+                    : "Generate Website"}
+              </ActionButton>
+              {!websiteLoading && !ad.output_url && (
+                <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>
+                  Generates a self-contained HTML page · uses brand kit + strategy
+                </p>
+              )}
+            </div>
+            {ad.output_url && (
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "14px 18px", borderRadius: "10px",
+                border: "1px solid rgba(16,185,129,0.3)",
+                backgroundColor: "rgba(16,185,129,0.06)",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <Globe size={16} style={{ color: "var(--color-accent)", flexShrink: 0 }} />
+                  <div>
+                    <p style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-input-text)" }}>
+                      Landing page ready
+                    </p>
+                    <p style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", marginTop: "2px" }}>
+                      Self-contained HTML · brand-styled · responsive
+                    </p>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <a
+                    href={adsAPI.websitePreviewUrl(id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "5px",
+                      padding: "7px 14px", borderRadius: "8px", fontSize: "0.8rem", fontWeight: 600,
+                      backgroundColor: "var(--color-accent)", color: "#fff",
+                      textDecoration: "none", border: "none",
+                    }}
+                  >
+                    <Eye size={13} /> Preview
+                  </a>
+                  <a
+                    href={adsAPI.websiteDownloadUrl(id)}
+                    download="landing-page.html"
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "5px",
+                      padding: "7px 14px", borderRadius: "8px", fontSize: "0.8rem", fontWeight: 600,
+                      border: "1px solid var(--color-card-border)",
+                      backgroundColor: "var(--color-card-bg)", color: "var(--color-input-text)",
+                      textDecoration: "none",
+                    }}
+                  >
+                    <Download size={13} /> Download
+                  </a>
+                </div>
+              </div>
             )}
           </SectionCard>
         )}
