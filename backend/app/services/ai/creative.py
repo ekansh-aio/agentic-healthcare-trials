@@ -23,17 +23,18 @@ from app.core.config import settings
 
 
 # Titan Image Generator v2 supported dimension pairs (width, height)
+# Ref: https://docs.aws.amazon.com/bedrock/latest/userguide/titan-image-models.html
 _FORMAT_DIMENSIONS = {
     "1080x1080": (1024, 1024),
     "square":    (1024, 1024),
-    "1080x1920": (768, 1344),
-    "story":     (768, 1344),
-    "portrait":  (768, 1344),
-    "9x16":      (768, 1344),
-    "16:9":      (1344, 768),
-    "landscape": (1344, 768),
-    "banner":    (1344, 768),
-    "16x9":      (1344, 768),
+    "1080x1920": (896, 1152),   # portrait / story — closest valid to 9:16
+    "story":     (896, 1152),
+    "portrait":  (896, 1152),
+    "9x16":      (896, 1152),
+    "16:9":      (1152, 896),   # landscape / banner — closest valid to 16:9
+    "landscape": (1152, 896),
+    "banner":    (1152, 896),
+    "16x9":      (1152, 896),
 }
 
 _CREATIVE_SYSTEM = """You are an expert advertising creative director.

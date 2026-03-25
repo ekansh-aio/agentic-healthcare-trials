@@ -20,7 +20,7 @@
  *   - Publish            — approved (publisher / admin)
  */
 
-import React, { useState, useEffect, useCallback, Component } from "react";
+import React, { useState, useEffect, useCallback, useRef, Component } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { PageWithSidebar, SectionCard, CampaignStatusBadge } from "../shared/Layout";
 import { adsAPI } from "../../services/api";
@@ -31,6 +31,78 @@ import {
   MessageCircle, Send, ThumbsUp, ThumbsDown, RefreshCw, Sparkles,
   Download, Eye, Trash2,
 } from "lucide-react";
+
+// ─── Generate progress hook ───────────────────────────────────────────────────
+function useGenerateProgress() {
+  const [progress, setProgress] = useState(0);
+  const [label,    setLabel]    = useState("");
+  const timerRef   = useRef(null);
+  const startedAt  = useRef(null);
+  const durationMs = useRef(20000);
+
+  const tick = useCallback(() => {
+    const elapsed = Date.now() - startedAt.current;
+    const dur     = durationMs.current;
+    // Exponential easing — reaches ~86% at 1× duration, asymptotes at 92%
+    const pct = Math.min(92, 92 * (1 - Math.exp(-(elapsed / dur) * 2)));
+    setProgress(Math.round(pct));
+  }, []);
+
+  const start = useCallback((taskLabel, estimatedMs = 20000) => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    startedAt.current  = Date.now();
+    durationMs.current = estimatedMs;
+    setLabel(taskLabel);
+    setProgress(2);
+    timerRef.current = setInterval(tick, 250);
+  }, [tick]);
+
+  const complete = useCallback(() => {
+    clearInterval(timerRef.current);
+    setProgress(100);
+    setTimeout(() => { setProgress(0); setLabel(""); }, 700);
+  }, []);
+
+  const fail = useCallback(() => {
+    clearInterval(timerRef.current);
+    setProgress(0);
+    setLabel("");
+  }, []);
+
+  useEffect(() => () => clearInterval(timerRef.current), []);
+
+  return { progress, label, start, complete, fail };
+}
+
+function InlineProgress({ progress }) {
+  if (!progress) return null;
+  const done = progress === 100;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: 0 }}>
+      <div style={{
+        flex: 1, height: "5px", minWidth: "80px", maxWidth: "220px",
+        background: "var(--color-accent-subtle)",
+        borderRadius: "50px", overflow: "hidden",
+      }}>
+        <div style={{
+          height: "100%",
+          width: `${progress}%`,
+          background: done ? "var(--color-accent)" : "var(--color-accent)",
+          opacity: done ? 1 : 0.85,
+          borderRadius: "50px",
+          transition: "width 0.25s ease",
+        }} />
+      </div>
+      <span style={{
+        fontSize: "0.72rem", fontWeight: 600,
+        color: done ? "var(--color-accent)" : "var(--color-accent-text)",
+        fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
+      }}>
+        {done ? "✓ Done" : `${progress}%`}
+      </span>
+    </div>
+  );
+}
 
 // ─── Status lifecycle ─────────────────────────────────────────────────────────
 const STATUS_STEPS = [
@@ -1056,6 +1128,8 @@ function CampaignDetailPageInner() {
   const [websiteLoading,  setWebsiteLoading]  = useState(false);
   const [websiteError,    setWebsiteError]    = useState(null);
 
+  const genProgress = useGenerateProgress();
+
   const role = JSON.parse(localStorage.getItem("user") || "{}").role;
 
   const load = useCallback(async () => {
@@ -1080,10 +1154,13 @@ function CampaignDetailPageInner() {
   // ── Action handlers ──────────────────────────────────────────────────────
   const handleGenerateStrategy = async () => {
     setGenLoading(true); setGenError(null);
+    genProgress.start("Generating strategy…", 25000);
     try {
       const updated = await adsAPI.generateStrategy(id);
       setAd(updated);
+      genProgress.complete();
     } catch (err) {
+      genProgress.fail();
       setGenError(err.message || "Strategy generation failed. Check that training has been run and API keys are configured.");
     } finally {
       setGenLoading(false);
@@ -1092,10 +1169,13 @@ function CampaignDetailPageInner() {
 
   const handleSubmitForReview = async () => {
     setRevLoading(true); setRevError(null);
+    genProgress.start("Running AI review…", 20000);
     try {
       const updated = await adsAPI.submitForReview(id);
       setAd(updated);
+      genProgress.complete();
     } catch (err) {
+      genProgress.fail();
       setRevError(err.message || "Failed to submit for review.");
     } finally {
       setRevLoading(false);
@@ -1104,10 +1184,13 @@ function CampaignDetailPageInner() {
 
   const handlePublish = async () => {
     setPubLoading(true); setPubError(null);
+    genProgress.start("Publishing campaign…", 8000);
     try {
       const updated = await adsAPI.publish(id);
       setAd(updated);
+      genProgress.complete();
     } catch (err) {
+      genProgress.fail();
       setPubError(err.message || "Publish failed. Campaign must be approved first.");
     } finally {
       setPubLoading(false);
@@ -1120,10 +1203,13 @@ function CampaignDetailPageInner() {
 
   const handleGenerateCreatives = async () => {
     setCreativeLoading(true); setCreativeError(null);
+    genProgress.start("Generating ad creatives + images…", 60000);
     try {
       const updated = await adsAPI.generateCreatives(id);
       setAd(updated);
+      genProgress.complete();
     } catch (err) {
+      genProgress.fail();
       setCreativeError(err.message || "Creative generation failed.");
     } finally {
       setCreativeLoading(false);
@@ -1132,10 +1218,13 @@ function CampaignDetailPageInner() {
 
   const handleGenerateWebsite = async () => {
     setWebsiteLoading(true); setWebsiteError(null);
+    genProgress.start("Building landing page…", 35000);
     try {
       const updated = await adsAPI.generateWebsite(id);
       setAd(updated);
+      genProgress.complete();
     } catch (err) {
+      genProgress.fail();
       setWebsiteError(err.message || "Website generation failed.");
     } finally {
       setWebsiteLoading(false);
@@ -1365,9 +1454,10 @@ function CampaignDetailPageInner() {
               <ActionButton onClick={handleGenerateStrategy} loading={genLoading} icon={<Zap size={14} />}>
                 {genLoading ? "Generating…" : "Generate Strategy with Claude"}
               </ActionButton>
-              <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>
-                Uses your trained Curator skill · typical time: 15–30 s
-              </p>
+              {genLoading
+                ? <InlineProgress progress={genProgress.progress} />
+                : <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>Uses your trained Curator skill · typical time: 15–30 s</p>
+              }
             </div>
           </SectionCard>
         )}
@@ -1398,9 +1488,12 @@ function CampaignDetailPageInner() {
                 <p style={{ fontSize: "0.82rem", color: "#ef4444", lineHeight: 1.5 }}>{revError}</p>
               </div>
             )}
-            <ActionButton onClick={handleSubmitForReview} loading={revLoading} variant="primary" icon={<Send size={14} />}>
-              {revLoading ? "Processing…" : "Submit for AI Review"}
-            </ActionButton>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <ActionButton onClick={handleSubmitForReview} loading={revLoading} variant="primary" icon={<Send size={14} />}>
+                {revLoading ? "Processing…" : "Submit for AI Review"}
+              </ActionButton>
+              {revLoading && <InlineProgress progress={genProgress.progress} />}
+            </div>
           </SectionCard>
         )}
 
@@ -1503,16 +1596,19 @@ function CampaignDetailPageInner() {
                 icon={<Sparkles size={14} />}
               >
                 {creativeLoading
-                  ? "Generating creatives… (30–90s)"
+                  ? "Generating…"
                   : ad.output_files?.length
                     ? "Regenerate Creatives"
                     : "Generate Ad Creatives"}
               </ActionButton>
-              {!creativeLoading && !ad.output_files?.length && (
-                <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>
-                  Generates copy + images for all ad formats · uses AWS Bedrock Titan
-                </p>
-              )}
+              {creativeLoading
+                ? <InlineProgress progress={genProgress.progress} />
+                : !ad.output_files?.length && (
+                    <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>
+                      Generates copy + images for all ad formats · uses AWS Bedrock Titan
+                    </p>
+                  )
+              }
             </div>
             {ad.output_files?.length > 0 && (
               <CreativesViewer creatives={ad.output_files} />
@@ -1539,16 +1635,19 @@ function CampaignDetailPageInner() {
                 icon={<Globe size={14} />}
               >
                 {websiteLoading
-                  ? "Generating page… (30–60s)"
+                  ? "Generating…"
                   : ad.output_url
                     ? "Regenerate Website"
                     : "Generate Website"}
               </ActionButton>
-              {!websiteLoading && !ad.output_url && (
-                <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>
-                  Generates a self-contained HTML page · uses brand kit + strategy
-                </p>
-              )}
+              {websiteLoading
+                ? <InlineProgress progress={genProgress.progress} />
+                : !ad.output_url && (
+                    <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>
+                      Generates a self-contained HTML page · uses brand kit + strategy
+                    </p>
+                  )
+              }
             </div>
             {ad.output_url && (
               <div style={{
@@ -1613,9 +1712,12 @@ function CampaignDetailPageInner() {
                 <p style={{ fontSize: "0.82rem", color: "#ef4444", lineHeight: 1.5 }}>{pubError}</p>
               </div>
             )}
-            <ActionButton onClick={handlePublish} loading={pubLoading} icon={<Zap size={14} />}>
-              {pubLoading ? "Publishing…" : "Publish Campaign"}
-            </ActionButton>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <ActionButton onClick={handlePublish} loading={pubLoading} icon={<Zap size={14} />}>
+                {pubLoading ? "Publishing…" : "Publish Campaign"}
+              </ActionButton>
+              {pubLoading && <InlineProgress progress={genProgress.progress} />}
+            </div>
           </SectionCard>
         )}
 
