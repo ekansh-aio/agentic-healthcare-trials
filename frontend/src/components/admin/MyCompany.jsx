@@ -11,12 +11,13 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { PageWithSidebar, SectionCard } from "../shared/Layout";
-import { documentsAPI, brandKitAPI, onboardingAPI } from "../../services/api";
+import { documentsAPI, brandKitAPI, onboardingAPI, companyAPI } from "../../services/api";
 import { useAuth } from "../../contexts/AuthContext";
 import { applyBrandTheme, resetBrandTheme, isDefaultThemeOverrideActive } from "../../services/theme";
 import {
   FileText, Plus, Pencil, Trash2, Upload, X, File, CheckCircle2, Download,
   Palette, Check, ChevronDown, ChevronUp, RotateCcw, Sparkles, Loader2, AlertCircle,
+  MapPin, Search,
 } from "lucide-react";
 import { DOC_TYPES, ACCEPTED_DOC_FORMATS, ACCEPTED_DOC_MIME, BRAND_PRESETS, DEFAULT_PRESETS } from "../onboarding/Constants";
 
@@ -467,6 +468,353 @@ function EditDocumentForm({ doc, onSave, onCancel, loading }) {
 
 
 
+// ── Locations Panel ────────────────────────────────────────────────────────
+const COUNTRIES = [
+  "Afghanistan","Albania","Algeria","Argentina","Armenia","Australia","Austria",
+  "Azerbaijan","Bahrain","Bangladesh","Belarus","Belgium","Bolivia","Brazil",
+  "Bulgaria","Cambodia","Canada","Chile","China","Colombia","Croatia","Czech Republic",
+  "Denmark","Dominican Republic","Ecuador","Egypt","Ethiopia","Finland","France",
+  "Georgia","Germany","Ghana","Greece","Guatemala","Honduras","Hong Kong","Hungary",
+  "India","Indonesia","Iran","Iraq","Ireland","Israel","Italy","Jamaica","Japan",
+  "Jordan","Kazakhstan","Kenya","Kuwait","Lebanon","Malaysia","Mexico","Morocco",
+  "Myanmar","Nepal","Netherlands","New Zealand","Nigeria","Norway","Oman","Pakistan",
+  "Panama","Peru","Philippines","Poland","Portugal","Qatar","Romania","Russia",
+  "Saudi Arabia","Serbia","Singapore","South Africa","South Korea","Spain",
+  "Sri Lanka","Sweden","Switzerland","Taiwan","Tanzania","Thailand","Turkey",
+  "Ukraine","United Arab Emirates","United Kingdom","United States","Uruguay",
+  "Venezuela","Vietnam","Yemen","Zambia","Zimbabwe",
+];
+
+function LocationsPanel() {
+  const [open,      setOpen]      = useState(false);
+  const [locations, setLocations] = useState([]);   // [{ country, cities }]
+  const [saving,    setSaving]    = useState(false);
+  const [saved,     setSaved]     = useState(false);
+  const [error,     setError]     = useState("");
+
+  // dropdown state
+  const [query,    setQuery]    = useState("");
+  const [ddOpen,   setDdOpen]   = useState(false);
+  const [active,   setActive]   = useState(null);  // country being edited
+  const [cityInput,setCityInput]= useState("");
+  const ddRef = useRef(null);
+
+  useEffect(() => {
+    companyAPI.getProfile()
+      .then((p) => setLocations(p.locations || []))
+      .catch(() => {});
+  }, []);
+
+  // close dropdown on outside click
+  useEffect(() => {
+    const h = (e) => { if (ddRef.current && !ddRef.current.contains(e.target)) setDdOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
+  const filtered = query.trim()
+    ? COUNTRIES.filter((c) => c.toLowerCase().includes(query.toLowerCase()))
+    : COUNTRIES;
+
+  const addCountry = (country) => {
+    setLocations((prev) =>
+      prev.find((l) => l.country === country) ? prev : [...prev, { country, cities: [] }]
+    );
+    setActive(country);
+    setDdOpen(false);
+    setQuery("");
+  };
+
+  const removeCountry = (country) => {
+    setLocations((prev) => prev.filter((l) => l.country !== country));
+    if (active === country) setActive(null);
+  };
+
+  const addCity = (country) => {
+    const city = cityInput.trim();
+    if (!city) return;
+    setLocations((prev) =>
+      prev.map((l) =>
+        l.country === country
+          ? { ...l, cities: l.cities.includes(city) ? l.cities : [...l.cities, city] }
+          : l
+      )
+    );
+    setCityInput("");
+  };
+
+  const removeCity = (country, city) => {
+    setLocations((prev) =>
+      prev.map((l) =>
+        l.country === country ? { ...l, cities: l.cities.filter((c) => c !== city) } : l
+      )
+    );
+  };
+
+  const handleSave = async () => {
+    setSaving(true); setError(""); setSaved(false);
+    try {
+      await companyAPI.updateLocations(locations);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      setError(err.message || "Failed to save locations.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const totalCities = locations.reduce((n, l) => n + l.cities.length, 0);
+
+  return (
+    <div className="page-card mb-8">
+
+      {/* Header */}
+      <button
+        onClick={() => setOpen((p) => !p)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center",
+          justifyContent: "space-between",
+          padding: "16px 24px", background: "none", border: "none",
+          cursor: "pointer", borderRadius: "var(--radius-card)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div style={{
+            width: "32px", height: "32px", borderRadius: "8px", flexShrink: 0,
+            backgroundColor: "var(--color-accent)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <MapPin size={15} style={{ color: "#fff" }} />
+          </div>
+          <div style={{ textAlign: "left" }}>
+            <p className="page-card__title">Operating Locations</p>
+            <p className="page-card__subtitle">
+              {locations.length === 0
+                ? "No locations added yet"
+                : `${locations.length} ${locations.length === 1 ? "country" : "countries"}, ${totalCities} ${totalCities === 1 ? "city" : "cities"}`
+              }
+            </p>
+          </div>
+        </div>
+        {open ? <ChevronUp size={16} style={{ color: "var(--color-sidebar-text)", flexShrink: 0 }} />
+               : <ChevronDown size={16} style={{ color: "var(--color-sidebar-text)", flexShrink: 0 }} />}
+      </button>
+
+      {/* Body */}
+      {open && (
+        <div style={{ padding: "0 24px 24px" }}>
+
+          {/* Country dropdown */}
+          <div ref={ddRef} style={{ position: "relative", marginBottom: "20px" }}>
+            <p className="text-xs font-semibold uppercase tracking-wide mb-2"
+              style={{ color: "var(--color-sidebar-text)" }}>
+              Add a Country
+            </p>
+            <button
+              type="button"
+              onClick={() => setDdOpen((p) => !p)}
+              style={{
+                width: "100%", display: "flex", alignItems: "center",
+                justifyContent: "space-between",
+                padding: "10px 12px", borderRadius: "8px",
+                border: "1px solid var(--color-input-border)",
+                backgroundColor: "var(--color-input-bg)",
+                color: "var(--color-sidebar-text)", fontSize: "0.875rem", cursor: "pointer",
+              }}
+            >
+              <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <Search size={13} /> Select a country…
+              </span>
+              {ddOpen
+                ? <ChevronUp size={13} />
+                : <ChevronDown size={13} />}
+            </button>
+
+            {ddOpen && (
+              <div style={{
+                position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
+                backgroundColor: "var(--color-card-bg)",
+                border: "1px solid var(--color-card-border)",
+                borderRadius: "8px", boxShadow: "0 10px 25px rgba(0,0,0,0.35)",
+                overflow: "hidden",
+              }}>
+                <div style={{ padding: "8px", borderBottom: "1px solid var(--color-input-border)" }}>
+                  <input
+                    autoFocus
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search countries…"
+                    className="field-input"
+                    style={{ marginBottom: 0, padding: "6px 10px" }}
+                  />
+                </div>
+                <ul style={{ maxHeight: "180px", overflowY: "auto", margin: 0, padding: "4px 0", listStyle: "none" }}>
+                  {filtered.length === 0 && (
+                    <li style={{ padding: "8px 12px", color: "var(--color-sidebar-text)", fontSize: "0.8rem" }}>
+                      No results
+                    </li>
+                  )}
+                  {filtered.map((country) => {
+                    const already = locations.some((l) => l.country === country);
+                    return (
+                      <li
+                        key={country}
+                        onClick={() => addCountry(country)}
+                        style={{
+                          padding: "8px 12px", cursor: "pointer", fontSize: "0.85rem",
+                          color: already ? "var(--color-accent)" : "var(--color-input-text)",
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--color-input-bg)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                      >
+                        {country}
+                        {already && <CheckCircle2 size={13} style={{ color: "var(--color-accent)" }} />}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          {/* Location cards */}
+          {locations.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
+              {locations.map(({ country, cities }) => (
+                <div
+                  key={country}
+                  style={{
+                    borderRadius: "10px",
+                    border: `1px solid ${active === country ? "var(--color-accent)" : "var(--color-input-border)"}`,
+                    backgroundColor: "var(--color-input-bg)",
+                    overflow: "hidden", transition: "border-color 0.15s",
+                  }}
+                >
+                  {/* Country row */}
+                  <div
+                    onClick={() => setActive(active === country ? null : country)}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "10px 14px", cursor: "pointer",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <MapPin size={14} style={{ color: "var(--color-accent)", flexShrink: 0 }} />
+                      <span style={{ color: "var(--color-input-text)", fontWeight: 600, fontSize: "0.875rem" }}>
+                        {country}
+                      </span>
+                      {cities.length > 0 && (
+                        <span style={{
+                          fontSize: "0.7rem", color: "var(--color-sidebar-text)",
+                          backgroundColor: "var(--color-card-bg)",
+                          padding: "2px 7px", borderRadius: "999px",
+                          border: "1px solid var(--color-card-border)",
+                        }}>
+                          {cities.length} {cities.length === 1 ? "city" : "cities"}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); removeCountry(country); }}
+                      style={{ background: "none", border: "none", cursor: "pointer", padding: "2px", display: "flex", color: "var(--color-sidebar-text)" }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+
+                  {/* City editor */}
+                  {active === country && (
+                    <div style={{ padding: "0 14px 14px" }}>
+                      {cities.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "10px" }}>
+                          {cities.map((city) => (
+                            <span
+                              key={city}
+                              style={{
+                                display: "inline-flex", alignItems: "center", gap: "4px",
+                                padding: "3px 8px", borderRadius: "999px",
+                                backgroundColor: "rgba(16,185,129,0.1)",
+                                border: "1px solid var(--color-accent)",
+                                color: "var(--color-accent)", fontSize: "0.75rem",
+                              }}
+                            >
+                              {city}
+                              <button
+                                type="button"
+                                onClick={() => removeCity(country, city)}
+                                style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", padding: 0, display: "flex" }}
+                              >
+                                <X size={10} />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <input
+                          value={cityInput}
+                          onChange={(e) => setCityInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCity(country); } }}
+                          placeholder="Type a city and press Enter…"
+                          className="field-input"
+                          style={{ flex: 1, marginBottom: 0, padding: "7px 10px" }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => addCity(country)}
+                          className="btn--accent"
+                          style={{ padding: "7px 12px", fontSize: "0.8rem" }}
+                        >
+                          <Plus size={13} /> Add
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Empty state */}
+          {locations.length === 0 && (
+            <div style={{
+              textAlign: "center", padding: "24px 16px", borderRadius: "10px",
+              border: "1px dashed var(--color-input-border)",
+              color: "var(--color-sidebar-text)", fontSize: "0.8rem", marginBottom: "20px",
+            }}>
+              <MapPin size={24} style={{ marginBottom: "8px", opacity: 0.4 }} />
+              <p style={{ margin: 0 }}>No locations yet. Select a country above to get started.</p>
+            </div>
+          )}
+
+          {/* Error */}
+          {error && <div className="alert--error mb-4">{error}</div>}
+
+          {/* Save row */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "12px" }}>
+            {saved && (
+              <div className="alert--success py-2 px-3">
+                <Check size={14} strokeWidth={2.5} /> Locations saved
+              </div>
+            )}
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="btn--accent px-6 py-2.5"
+            >
+              {saving ? <><span className="spinner" /> Saving…</> : "Save Locations"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── Brand Kit Panel ────────────────────────────────────────────────────────
 function BrandKitPanel() {
   const [open,           setOpen]           = useState(false);
@@ -899,6 +1247,9 @@ export default function MyCompany() {
 
       {/* Brand kit — admin only */}
       {role === "study_coordinator" && <BrandKitPanel />}
+
+      {/* Operating locations — admin only */}
+      {role === "study_coordinator" && <LocationsPanel />}
 
       {/* Page header */}
       <div className="page-header">

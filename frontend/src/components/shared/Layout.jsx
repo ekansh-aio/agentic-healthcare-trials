@@ -110,7 +110,7 @@ export function AppSidebar() {
           <div className="sidebar__logo-mark">
             <div className="w-2.5 h-2.5 bg-gray-950 rounded-sm" />
           </div>
-          <span className="sidebar__app-name">AgenticMarketing</span>
+          <span className="sidebar__app-name">ClinAds Pro</span>
         </div>
         <p className="sidebar__role-label">{role?.replace("_", " ")}</p>
       </div>

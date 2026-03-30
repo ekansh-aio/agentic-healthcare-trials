@@ -204,6 +204,7 @@ class AdvertisementCreate(BaseModel):
     duration: Optional[str] = None
     platforms: Optional[List[str]] = None
     target_audience: Optional[Dict[str, Any]] = None
+    trial_location: Optional[List[Dict[str, Any]]] = None  # [{ country, city }]
 
 class AdvertisementOut(BaseModel):
     id: str
@@ -221,6 +222,7 @@ class AdvertisementOut(BaseModel):
     output_url: Optional[str] = None
     output_files: Optional[List[Dict[str, Any]]] = None
     questionnaire: Optional[Dict[str, Any]] = None
+    trial_location: Optional[List[Dict[str, Any]]] = None
     created_at: datetime
     updated_at: datetime
 
@@ -233,6 +235,7 @@ class AdvertisementUpdate(BaseModel):
     platforms: Optional[List[str]] = None
     target_audience: Optional[Dict[str, Any]] = None
     status: Optional[AdStatusEnum] = None
+    trial_location: Optional[List[Dict[str, Any]]] = None
 
 class QuestionnaireUpdate(BaseModel):
     questionnaire: Dict[str, Any]

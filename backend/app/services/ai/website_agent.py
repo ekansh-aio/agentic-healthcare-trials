@@ -485,6 +485,11 @@ class WebsiteAgentService:
   var unread  = document.getElementById('chat-unread');
   if (!panel || !toggle) return;
 
+  var AD_ID    = '{ad_id}';
+  var API_BASE = window.location.origin;
+  var history  = [];
+  var sending  = false;
+
   function openChat() {{
     panel.classList.add('open');
     if (unread) unread.style.display = 'none';
@@ -503,24 +508,43 @@ class WebsiteAgentService:
     b.textContent = text;
     box.appendChild(b);
     box.scrollTop = box.scrollHeight;
+    return b;
   }}
 
-  var replies = [
-    "Thanks for reaching out! How can I help you today?",
-    "That's a great question — let me help with that.",
-    "Could you share a bit more so I can assist you better?",
-    "Absolutely, our team will follow up with you shortly.",
-    "Happy to help! Here's what I can tell you\u2026"
-  ];
-  var ri = 0;
+  function setInput(disabled) {{
+    sending        = disabled;
+    input.disabled = disabled;
+    send.disabled  = disabled;
+  }}
 
-  function sendMsg() {{
+  async function sendMsg() {{
     var val = (input.value || '').trim();
-    if (!val) return;
+    if (!val || sending) return;
     addMsg(val, 'user');
     input.value = '';
-    var delay = 650 + Math.random() * 500;
-    setTimeout(function () {{ addMsg(replies[ri++ % replies.length], 'bot'); }}, delay);
+    setInput(true);
+
+    var typing = addMsg('\u2026', 'bot');
+
+    try {{
+      var resp = await fetch(API_BASE + '/api/chat', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ projectId: AD_ID, message: val, history: history }})
+      }});
+      var data  = resp.ok ? await resp.json() : null;
+      var reply = (data && data.reply) ? data.reply : "I\u2019m sorry, I couldn\u2019t process that. Please try again.";
+      box.removeChild(typing);
+      history.push({{ role: 'user', content: val }});
+      history.push({{ role: 'assistant', content: reply }});
+      addMsg(reply, 'bot');
+    }} catch (e) {{
+      box.removeChild(typing);
+      addMsg("I\u2019m sorry, something went wrong. Please try again.", 'bot');
+    }}
+
+    setInput(false);
+    input.focus();
   }}
 
   if (send)  send.addEventListener('click', sendMsg);

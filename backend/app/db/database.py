@@ -85,3 +85,28 @@ async def init_db():
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_skill_configs_company_skill "
             "ON skill_configs (company_id, skill_type);"
         ))
+        # Add locations column to companies if missing
+        await conn.execute(_sql(
+            "ALTER TABLE companies ADD COLUMN IF NOT EXISTS locations JSON;"
+        ))
+        # Add trial_location column to advertisements if missing
+        await conn.execute(_sql(
+            "ALTER TABLE advertisements ADD COLUMN IF NOT EXISTS trial_location JSON;"
+        ))
+        # Migrate userrole enum: add new role values if they don't exist.
+        # The DB was originally created with ADMIN/REVIEWER/ETHICS_REVIEWER/PUBLISHER.
+        # The codebase now uses STUDY_COORDINATOR/PROJECT_MANAGER/ETHICS_MANAGER/PUBLISHER.
+        for new_role in ("STUDY_COORDINATOR", "PROJECT_MANAGER", "ETHICS_MANAGER"):
+            await conn.execute(_sql(
+                f"ALTER TYPE userrole ADD VALUE IF NOT EXISTS '{new_role}';"
+            ))
+        # Migrate existing users from old role names to new role names.
+        await conn.execute(_sql(
+            "UPDATE users SET role = 'STUDY_COORDINATOR' WHERE role = 'ADMIN';"
+        ))
+        await conn.execute(_sql(
+            "UPDATE users SET role = 'PROJECT_MANAGER' WHERE role = 'REVIEWER';"
+        ))
+        await conn.execute(_sql(
+            "UPDATE users SET role = 'ETHICS_MANAGER' WHERE role = 'ETHICS_REVIEWER';"
+        ))

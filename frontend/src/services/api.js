@@ -104,6 +104,17 @@ export const onboardingAPI = {
     request("/onboarding/train", { method: "POST" }),
 };
 
+// ─── Company ─────────────────────────────────────────────────────────────────
+
+export const companyAPI = {
+  getProfile: () => request("/company/profile"),
+  updateLocations: (locations) =>
+    request("/company/locations", {
+      method: "PATCH",
+      body: JSON.stringify({ locations }),
+    }),
+};
+
 // ─── Brand Kit ───────────────────────────────────────────────────────────────
 
 export const brandKitAPI = {

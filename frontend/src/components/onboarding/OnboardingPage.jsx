@@ -28,6 +28,7 @@ import StepIndicator       from "./StepIndicator";
 import CompanyInfoStep     from "./steps/CompanyInfoStep";
 import AdminAccountStep    from "./steps/AdminAccountStep";
 import UploadDocumentsStep from "./steps/UploadDocumentsStep";
+import LocationStep        from "./steps/LocationStep";
 import BrandKitStep        from "./steps/BrandKitStep";
 import AITrainingStep      from "./steps/AiTrainingStep";
 import ErrorBoundary       from "./ErrorBoundary";
@@ -79,7 +80,11 @@ export default function OnboardingPage() {
   // Each entry: { doc_type, title, file, file_name, file_size, file_type }
   const [docs, setDocs] = useState([]);
 
-  // ── Step 3: brand kit ─────────────────────────────────────────────────────
+  // ── Step 3: locations ─────────────────────────────────────────────────────
+  // Each entry: { country: string, cities: string[] }
+  const [locations, setLocations] = useState([]);
+
+  // ── Step 4: brand kit ─────────────────────────────────────────────────────
   const [brand, setBrand] = useState({
     primaryColor:   null,
     secondaryColor: null,
@@ -93,7 +98,7 @@ export default function OnboardingPage() {
   const [selectedPreset, setSelectedPreset] = useState(null);
   const [brandPdfFile,   setBrandPdfFile]   = useState(null);
 
-  // ── Step 4: training ──────────────────────────────────────────────────────
+  // ── Step 5: training ──────────────────────────────────────────────────────
   const [trainingDone, setTrainingDone] = useState(false);
 
   // ── Navigation ────────────────────────────────────────────────────────────
@@ -226,7 +231,7 @@ export default function OnboardingPage() {
             <div style={{ width: "12px", height: "12px", borderRadius: "3px", backgroundColor: "var(--color-sidebar-bg)" }} />
           </div>
           <span style={{ color: "#ffffff", fontWeight: 600, fontSize: "1.125rem", letterSpacing: "-0.02em" }}>
-            AgenticMarketing
+            ClinAds Pro
           </span>
         </div>
 
@@ -291,6 +296,16 @@ export default function OnboardingPage() {
               )}
 
               {step === 3 && (
+                <LocationStep
+                  locations={locations}
+                  setLocations={setLocations}
+                  onBack={() => goToStep(2)}
+                  onNext={() => setStep(4)}
+                  onSkip={() => setStep(4)}
+                />
+              )}
+
+              {step === 4 && (
                 <BrandKitStep
                   industry={form.industry}
                   brand={brand}
@@ -300,18 +315,18 @@ export default function OnboardingPage() {
                   brandPdfFile={brandPdfFile}
                   setBrandPdfFile={setBrandPdfFile}
                   setError={setError}
-                  onBack={() => goToStep(2)}
-                  onNext={() => setStep(4)}
-                  onSkip={() => setStep(4)}
+                  onBack={() => goToStep(3)}
+                  onNext={() => setStep(5)}
+                  onSkip={() => setStep(5)}
                 />
               )}
 
-              {step === 4 && (
+              {step === 5 && (
                 <AITrainingStep
                   loading={loading}
                   trainingDone={trainingDone}
                   onTrain={handleTrain}
-                  onBack={() => goToStep(3)}
+                  onBack={() => goToStep(4)}
                   onFinish={() => navigate("/study-coordinator")}
                 />
               )}

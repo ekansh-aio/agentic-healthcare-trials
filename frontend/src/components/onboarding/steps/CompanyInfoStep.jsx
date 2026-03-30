@@ -52,12 +52,6 @@ export default function CompanyInfoStep({ form, updateForm, logoFile, setLogoFil
         onChange={(e) => updateForm("company_name", e.target.value)}
         className="field-input"
       />
-      <input
-        placeholder="Industry (e.g. SaaS, Retail, Finance)"
-        value={form.industry}
-        onChange={(e) => updateForm("industry", e.target.value)}
-        className="field-input"
-      />
 
       {/* Logo upload */}
       <div>

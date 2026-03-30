@@ -16,12 +16,12 @@
  *  - Priority 10 — curator treats these as higher-priority context than company docs (0).
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageWithSidebar, SectionCard } from "../shared/Layout";
-import { adsAPI } from "../../services/api";
+import { adsAPI, companyAPI } from "../../services/api";
 import { useGeneration } from "../../contexts/GenerationContext";
-import { Globe, Image, Bot, MessageSquare, Sparkles, FileText, X, Upload } from "lucide-react";
+import { Globe, Image, Bot, MessageSquare, Sparkles, FileText, X, Upload, MapPin, ChevronDown } from "lucide-react";
 
 
 // Accepted MIME types and their display labels
@@ -198,6 +198,14 @@ export default function CampaignCreator() {
   const [createdAd,  setCreatedAd]  = useState(null);
   const [uploadProgress, setUploadProgress] = useState("");
 
+  const [companyLocations, setCompanyLocations] = useState([]);  // [{ country, cities }]
+
+  useEffect(() => {
+    companyAPI.getProfile()
+      .then((p) => setCompanyLocations(p.locations || []))
+      .catch(() => {});
+  }, []);
+
   const [form, setForm] = useState({
     title: "",
     ad_types: [],
@@ -205,6 +213,7 @@ export default function CampaignCreator() {
     duration: "",
     platforms: [],
     target_audience: { age_range: "", gender: "", interests: "" },
+    trial_location: { country: "", city: "" },
     protocol_docs: [],
   });
 
@@ -252,6 +261,9 @@ export default function CampaignCreator() {
         duration:        form.duration.trim() || null,
         platforms:       form.platforms,
         target_audience: form.target_audience,
+        trial_location:  form.trial_location.country
+          ? [{ country: form.trial_location.country, city: form.trial_location.city }]
+          : null,
       });
 
       // Step 2 — upload each protocol document scoped to this campaign
@@ -394,6 +406,88 @@ export default function CampaignCreator() {
                 </div>
               </div>
             </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Trial Location"
+            subtitle="Select the country and city where this trial is taking place."
+          >
+            {companyLocations.length === 0 ? (
+              <div style={{
+                display: "flex", alignItems: "center", gap: "10px",
+                padding: "14px 16px", borderRadius: "8px",
+                border: "1px dashed var(--color-card-border)",
+                color: "var(--color-sidebar-text)", fontSize: "0.82rem",
+              }}>
+                <MapPin size={16} style={{ opacity: 0.5, flexShrink: 0 }} />
+                No locations configured. Add locations in <strong style={{ marginLeft: 4 }}>My Company → Operating Locations</strong>.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                {/* Country */}
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: "var(--color-input-text)" }}>
+                    Country
+                  </label>
+                  <div style={{ position: "relative" }}>
+                    <select
+                      value={form.trial_location.country}
+                      onChange={(e) => update("trial_location", { country: e.target.value, city: "" })}
+                      className="field-input"
+                      style={{ appearance: "none", paddingRight: "32px" }}
+                    >
+                      <option value="">Select country…</option>
+                      {companyLocations.map((l) => (
+                        <option key={l.country} value={l.country}>{l.country}</option>
+                      ))}
+                    </select>
+                    <ChevronDown size={14} style={{
+                      position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)",
+                      color: "var(--color-sidebar-text)", pointerEvents: "none",
+                    }} />
+                  </div>
+                </div>
+
+                {/* City */}
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: "var(--color-input-text)" }}>
+                    City
+                  </label>
+                  {(() => {
+                    const loc = companyLocations.find((l) => l.country === form.trial_location.country);
+                    const cities = loc?.cities || [];
+                    return cities.length > 0 ? (
+                      <div style={{ position: "relative" }}>
+                        <select
+                          value={form.trial_location.city}
+                          onChange={(e) => update("trial_location", { ...form.trial_location, city: e.target.value })}
+                          className="field-input"
+                          style={{ appearance: "none", paddingRight: "32px" }}
+                          disabled={!form.trial_location.country}
+                        >
+                          <option value="">Select city…</option>
+                          {cities.map((c) => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                        <ChevronDown size={14} style={{
+                          position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)",
+                          color: "var(--color-sidebar-text)", pointerEvents: "none",
+                        }} />
+                      </div>
+                    ) : (
+                      <input
+                        value={form.trial_location.city}
+                        onChange={(e) => update("trial_location", { ...form.trial_location, city: e.target.value })}
+                        placeholder={form.trial_location.country ? "Enter city…" : "Select a country first"}
+                        disabled={!form.trial_location.country}
+                        className="field-input"
+                      />
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
           </SectionCard>
 
           <SectionCard

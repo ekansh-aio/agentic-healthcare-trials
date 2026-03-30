@@ -88,7 +88,7 @@ class TrainingService:
         skill_versions = {}
 
         for skill_name in TEMPLATES_TO_TRAIN:
-            print(f"  → Training {skill_name} skill for company {company.name}...")
+            print(f"  -> Training {skill_name} skill for company {company.name}...")
             template_path = os.path.join(TEMPLATES_DIR, f"{skill_name}_template.md")
             template = load_file(template_path)
 
@@ -127,7 +127,7 @@ class TrainingService:
             version = row.scalar_one()
 
             skill_versions[skill_name] = version
-            print(f"  ✅  {skill_name} skill saved to DB (v{version})")
+            print(f"  [OK] {skill_name} skill saved to DB (v{version})")
 
         await self.db.commit()
 
@@ -155,7 +155,7 @@ def train():
     print(f"Training skills for: {company_data['company_name']} ({company_data['industry']})\n")
 
     for skill_name in TEMPLATES_TO_TRAIN:
-        print(f"  → Training {skill_name} skill...")
+        print(f"  -> Training {skill_name} skill...")
         template_path = os.path.join(TEMPLATES_DIR, f"{skill_name}_template.md")
         template      = load_file(template_path)
 
@@ -165,7 +165,7 @@ def train():
         with open(output_path, "w") as f:
             f.write(filled)
 
-        print(f"  ✅  {skill_name}_skill.md written → {output_path}\n")
+        print(f"  [OK] {skill_name}_skill.md written -> {output_path}\n")
 
     print("Training complete.")
 

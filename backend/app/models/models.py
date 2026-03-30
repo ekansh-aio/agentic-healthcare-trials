@@ -77,6 +77,7 @@ class Company(Base):
     name       = Column(String(256), nullable=False)
     logo_url   = Column(String(512), nullable=True)
     industry   = Column(String(128), nullable=True)
+    locations  = Column(JSON, nullable=True)   # [{ country, cities: [] }]
     created_at = Column(DateTime, default=_now)
     onboarded  = Column(Boolean, default=False)
 
@@ -220,6 +221,7 @@ class Advertisement(Base):
     output_files      = Column(JSON, nullable=True)
     bot_config        = Column(JSON, nullable=True)
     questionnaire     = Column(JSON, nullable=True)         # {questions: [{id, text, type, options, required}]}
+    trial_location    = Column(JSON, nullable=True)         # { country, city }
     created_at        = Column(DateTime, default=_now)
     updated_at        = Column(DateTime, default=_now, onupdate=_now)
 

@@ -61,7 +61,7 @@ export default function LoginPage() {
           <div className="sidebar__logo-mark w-8 h-8 rounded-lg">
             <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: "var(--color-sidebar-bg)" }} />
           </div>
-          <span className="sidebar__app-name text-lg">AgenticMarketing</span>
+          <span className="sidebar__app-name text-lg">ClinAds Pro</span>
         </div>
 
         {/* Login card */}

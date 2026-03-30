@@ -65,6 +65,7 @@ async def create_advertisement(
         duration=body.duration,
         platforms=body.platforms,
         target_audience=body.target_audience,
+        trial_location=body.trial_location,
         status=AdStatus.DRAFT,
     )
     db.add(ad)
