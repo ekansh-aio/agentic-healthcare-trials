@@ -34,10 +34,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS for frontend
+# CORS for frontend and public landing pages.
+# The chat widget on generated landing pages is served from the same FastAPI origin,
+# so its fetch calls are same-origin and bypass CORS entirely.
+# "null" origin is sent by browsers for file:// or sandboxed iframes — allow it for dev.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "null",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

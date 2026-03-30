@@ -17,7 +17,7 @@ def _now():
     # warning from utcnow() while keeping the value naive for SQLAlchemy.
     return datetime.now(timezone.utc).replace(tzinfo=None)
 from sqlalchemy import (
-    Column, String, Text, DateTime, ForeignKey, Enum, Boolean,
+    Column, String, Text, DateTime, Date, ForeignKey, Enum, Boolean,
     Integer, Float, JSON, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
@@ -208,7 +208,9 @@ class Advertisement(Base):
     title             = Column(String(512), nullable=False)
     ad_type           = Column(JSON, nullable=False)
     campaign_category = Column(String(64), nullable=True)   # inferred by AI from title/context
-    duration          = Column(String(128), nullable=True)  # e.g. "4 weeks", "3 months"
+    duration          = Column(String(128), nullable=True)  # human-readable computed label
+    trial_start_date  = Column(Date, nullable=True)
+    trial_end_date    = Column(Date, nullable=True)
     status            = Column(Enum(AdStatus), default=AdStatus.DRAFT)
     budget            = Column(Float, nullable=True)
     platforms         = Column(JSON, nullable=True)
@@ -221,7 +223,8 @@ class Advertisement(Base):
     output_files      = Column(JSON, nullable=True)
     bot_config        = Column(JSON, nullable=True)
     questionnaire     = Column(JSON, nullable=True)         # {questions: [{id, text, type, options, required}]}
-    trial_location    = Column(JSON, nullable=True)         # { country, city }
+    trial_location    = Column(JSON, nullable=True)         # [{ country, city }]
+    patients_required = Column(Integer, nullable=True)      # total patients needed for trial
     created_at        = Column(DateTime, default=_now)
     updated_at        = Column(DateTime, default=_now, onupdate=_now)
 

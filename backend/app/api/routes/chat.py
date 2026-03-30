@@ -6,7 +6,7 @@ Flow (matches architecture diagram):
     → origin check (allowed_origins in bot_config)
     → load Advertisement from DB (in-memory TTL cache)
     → build system prompt (campaign context + rules)
-    → call Anthropic / Bedrock LLM
+    → call Claude Haiku 3.5 via Bedrock (or direct Anthropic API)
     → return { reply }
 
 No auth required — the widget is embedded in a public landing page.
@@ -22,7 +22,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.bedrock import get_async_client, get_model, is_configured
+from app.core.bedrock import get_async_client, is_configured
+from app.core.config import settings
 from app.db.database import get_db
 from app.models.models import Advertisement
 
@@ -30,7 +31,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
 
 # ── In-memory project cache ────────────────────────────────────────────────────
-# Avoids a DB round-trip on every message for the same campaign.
 _cache: dict = {}
 _CACHE_TTL = 300  # seconds
 
@@ -92,7 +92,6 @@ def _build_system_prompt(ad: Advertisement) -> str:
     if compliance:
         lines += ["", f"Compliance requirements: {compliance}"]
 
-    # Include key messages / FAQs from reviewer requirements if present
     if isinstance(ad.website_reqs, dict):
         for key in ("faqs", "key_messages", "talking_points"):
             val = ad.website_reqs.get(key)
@@ -103,7 +102,7 @@ def _build_system_prompt(ad: Advertisement) -> str:
     return "\n".join(lines)
 
 
-# ── Mock fallback (when no LLM is configured) ──────────────────────────────────
+# ── Mock fallback (when no AI backend is configured) ──────────────────────────
 _MOCK_REPLIES = [
     "Thanks for reaching out! Our research team will be happy to help — please use the contact options on this page.",
     "That's a great question. Could you tell me a bit more so I can point you in the right direction?",
@@ -126,7 +125,7 @@ async def chat(
     if ad is None:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # 2. Origin validation — optional; only enforced when allowed_origins is configured
+    # 2. Origin validation — only enforced when allowed_origins is configured
     bot_config      = ad.bot_config or {}
     allowed_origins = bot_config.get("allowed_origins") if isinstance(bot_config, dict) else None
     if allowed_origins:
@@ -134,11 +133,11 @@ async def chat(
         if origin not in allowed_origins:
             raise HTTPException(status_code=403, detail="Forbidden")
 
-    # 3. Build messages for the LLM
+    # 3. Build message list (Anthropic format: no system role in messages array)
     messages = [{"role": m.role, "content": m.content} for m in body.history]
     messages.append({"role": "user", "content": body.message})
 
-    # 4. Call LLM or return mock response
+    # 4. Call Haiku or return mock response
     if not is_configured():
         global _mock_idx
         reply = _MOCK_REPLIES[_mock_idx % len(_MOCK_REPLIES)]
@@ -146,9 +145,9 @@ async def chat(
         return ChatResponse(reply=reply)
 
     try:
-        client = get_async_client()
+        client   = get_async_client()
         response = await client.messages.create(
-            model=get_model(),
+            model=settings.CHAT_MODEL,
             max_tokens=512,
             system=_build_system_prompt(ad),
             messages=messages,

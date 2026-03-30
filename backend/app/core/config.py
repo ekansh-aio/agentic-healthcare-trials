@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     AWS_REGION: str = "us-east-1"
     BEDROCK_MODEL: str = "us.anthropic.claude-sonnet-4-6"
 
+    # Chat widget model (Haiku — lightweight, fast, stays within Bedrock)
+    CHAT_MODEL: str = "us.anthropic.claude-haiku-3-5-20241022"
+
     # ElevenLabs
     ELEVENLABS_API_KEY: Optional[str] = None
     ELEVENLABS_VOICE_ID: str = "EXAVITQu4vr4xnSDxMaL"  # Default: Rachel

@@ -2239,10 +2239,29 @@ function CampaignDetailPageInner() {
               <p style={{ fontSize: "0.95rem", fontWeight: 700, color: "#fff" }}>${ad.budget.toLocaleString()}</p>
             </div>
           )}
-          {ad.duration && (
+          {(ad.trial_start_date || ad.trial_end_date || ad.duration) && (
             <div>
               <p style={{ fontSize: "0.65rem", color: "rgba(255,255,255,0.4)", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 3 }}>Duration</p>
-              <p style={{ fontSize: "0.95rem", fontWeight: 700, color: "#fff" }}>{ad.duration}</p>
+              {ad.trial_start_date && ad.trial_end_date ? (
+                <>
+                  <p style={{ fontSize: "0.82rem", fontWeight: 700, color: "#fff" }}>
+                    {new Date(ad.trial_start_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                    {" – "}
+                    {new Date(ad.trial_end_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                  </p>
+                  {ad.duration && (
+                    <p style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.5)", marginTop: 2 }}>{ad.duration.split("(")[0].trim()}</p>
+                  )}
+                </>
+              ) : (
+                <p style={{ fontSize: "0.95rem", fontWeight: 700, color: "#fff" }}>{ad.duration}</p>
+              )}
+            </div>
+          )}
+          {ad.patients_required && (
+            <div>
+              <p style={{ fontSize: "0.65rem", color: "rgba(255,255,255,0.4)", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 3 }}>Patients Required</p>
+              <p style={{ fontSize: "0.95rem", fontWeight: 700, color: "#fff" }}>{ad.patients_required.toLocaleString()}</p>
             </div>
           )}
           {ad.platforms?.length > 0 && (
@@ -2303,6 +2322,36 @@ function CampaignDetailPageInner() {
                     {ad.target_audience.gender    && <p style={{ fontSize: "0.82rem", color: "var(--color-input-text)" }}>Gender: {ad.target_audience.gender}</p>}
                     {ad.target_audience.interests && <p style={{ fontSize: "0.82rem", color: "var(--color-input-text)" }}>Interests: {ad.target_audience.interests}</p>}
                   </div>
+                </div>
+              )}
+              {ad.patients_required && (
+                <div>
+                  <p style={{ fontSize: "0.72rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-sidebar-text)", marginBottom: "6px" }}>Patients Required</p>
+                  <p style={{ fontSize: "0.82rem", color: "var(--color-input-text)", fontWeight: 600 }}>
+                    {ad.patients_required.toLocaleString()} patients
+                  </p>
+                </div>
+              )}
+              {(ad.trial_start_date || ad.trial_end_date) && (
+                <div>
+                  <p style={{ fontSize: "0.72rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-sidebar-text)", marginBottom: "6px" }}>Trial Period</p>
+                  {ad.trial_start_date && (
+                    <p style={{ fontSize: "0.8rem", color: "var(--color-input-text)" }}>
+                      <span style={{ fontWeight: 600 }}>Start:</span>{" "}
+                      {new Date(ad.trial_start_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                    </p>
+                  )}
+                  {ad.trial_end_date && (
+                    <p style={{ fontSize: "0.8rem", color: "var(--color-input-text)", marginTop: "2px" }}>
+                      <span style={{ fontWeight: 600 }}>End:</span>{" "}
+                      {new Date(ad.trial_end_date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                    </p>
+                  )}
+                  {ad.duration && (
+                    <p style={{ fontSize: "0.75rem", color: "var(--color-sidebar-text)", marginTop: "4px" }}>
+                      {ad.duration.split("(")[0].trim()}
+                    </p>
+                  )}
                 </div>
               )}
               {ad.trial_location?.length > 0 && (

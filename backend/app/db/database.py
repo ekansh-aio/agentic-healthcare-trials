@@ -93,6 +93,17 @@ async def init_db():
         await conn.execute(_sql(
             "ALTER TABLE advertisements ADD COLUMN IF NOT EXISTS trial_location JSON;"
         ))
+        # Add patients_required column to advertisements if missing
+        await conn.execute(_sql(
+            "ALTER TABLE advertisements ADD COLUMN IF NOT EXISTS patients_required INTEGER;"
+        ))
+        # Add trial date range columns if missing
+        await conn.execute(_sql(
+            "ALTER TABLE advertisements ADD COLUMN IF NOT EXISTS trial_start_date DATE;"
+        ))
+        await conn.execute(_sql(
+            "ALTER TABLE advertisements ADD COLUMN IF NOT EXISTS trial_end_date DATE;"
+        ))
         # Migrate userrole enum: add new role values if they don't exist.
         # The DB was originally created with ADMIN/REVIEWER/ETHICS_REVIEWER/PUBLISHER.
         # The codebase now uses STUDY_COORDINATOR/PROJECT_MANAGER/ETHICS_MANAGER/PUBLISHER.

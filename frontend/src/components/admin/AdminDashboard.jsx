@@ -13,7 +13,7 @@ import { PageWithSidebar, SectionCard, MetricSummaryCard, CampaignStatusBadge } 
 import { adsAPI, usersAPI } from "../../services/api";
 import {
   Megaphone, Users, BarChart3, Clock, Plus, Eye,
-  CheckCircle, ClipboardList, ArrowRight,
+  CheckCircle, ClipboardList, ArrowRight, UserCheck,
 } from "lucide-react";
 
 const QUESTIONNAIRE_CATEGORIES = new Set(["recruitment", "hiring", "survey", "clinical_trial", "research"]);
@@ -187,9 +187,10 @@ export default function AdminDashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  const active    = ads.filter((a) => !["published"].includes(a.status));
-  const published = ads.filter((a) => a.status === "published");
-  const inReview  = ads.filter((a) => ["under_review", "ethics_review"].includes(a.status));
+  const active         = ads.filter((a) => !["published"].includes(a.status));
+  const published      = ads.filter((a) => a.status === "published");
+  const inReview       = ads.filter((a) => ["under_review", "ethics_review"].includes(a.status));
+  const totalPatients  = ads.reduce((sum, a) => sum + (a.patients_required || 0), 0);
 
   const onOpen = (ad) => navigate(`/study-coordinator/campaign/${ad.id}`);
 
@@ -207,11 +208,12 @@ export default function AdminDashboard() {
       </div>
 
       {/* KPI row */}
-      <div className="grid grid-cols-4 gap-4 mb-8">
-        <MetricSummaryCard label="Total Campaigns" value={loading ? "—" : ads.length}      icon={Megaphone} />
-        <MetricSummaryCard label="Published"        value={loading ? "—" : published.length} icon={BarChart3} trend={12} />
-        <MetricSummaryCard label="In Review"        value={loading ? "—" : inReview.length}  icon={Clock} />
-        <MetricSummaryCard label="Team Members"     value={loading ? "—" : users.length}     icon={Users} />
+      <div className="grid grid-cols-5 gap-4 mb-8">
+        <MetricSummaryCard label="Total Campaigns"    value={loading ? "—" : ads.length}                                       icon={Megaphone} />
+        <MetricSummaryCard label="Published"          value={loading ? "—" : published.length}                                 icon={BarChart3} trend={12} />
+        <MetricSummaryCard label="In Review"          value={loading ? "—" : inReview.length}                                  icon={Clock} />
+        <MetricSummaryCard label="Patients Required"  value={loading ? "—" : totalPatients > 0 ? totalPatients.toLocaleString() : "—"} icon={UserCheck} />
+        <MetricSummaryCard label="Team Members"       value={loading ? "—" : users.length}                                    icon={Users} />
       </div>
 
       {/* Active campaigns queue */}

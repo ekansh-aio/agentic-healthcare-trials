@@ -9,7 +9,7 @@ Each schema group corresponds to a specific module.
 
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List, Dict, Any, Literal
-from datetime import datetime
+from datetime import datetime, date
 from enum import Enum
 
 
@@ -202,9 +202,12 @@ class AdvertisementCreate(BaseModel):
     ad_type: List[AdTypeEnum]
     budget: Optional[float] = None
     duration: Optional[str] = None
+    trial_start_date: Optional[date] = None
+    trial_end_date: Optional[date] = None
     platforms: Optional[List[str]] = None
     target_audience: Optional[Dict[str, Any]] = None
     trial_location: Optional[List[Dict[str, Any]]] = None  # [{ country, city }]
+    patients_required: Optional[int] = None
 
 class AdvertisementOut(BaseModel):
     id: str
@@ -221,8 +224,12 @@ class AdvertisementOut(BaseModel):
     ad_details: Optional[Dict[str, Any]] = None
     output_url: Optional[str] = None
     output_files: Optional[List[Dict[str, Any]]] = None
+    bot_config: Optional[Dict[str, Any]] = None
     questionnaire: Optional[Dict[str, Any]] = None
     trial_location: Optional[List[Dict[str, Any]]] = None
+    patients_required: Optional[int] = None
+    trial_start_date: Optional[date] = None
+    trial_end_date: Optional[date] = None
     created_at: datetime
     updated_at: datetime
 
@@ -232,10 +239,14 @@ class AdvertisementOut(BaseModel):
 class AdvertisementUpdate(BaseModel):
     title: Optional[str] = None
     budget: Optional[float] = None
+    duration: Optional[str] = None
+    trial_start_date: Optional[date] = None
+    trial_end_date: Optional[date] = None
     platforms: Optional[List[str]] = None
     target_audience: Optional[Dict[str, Any]] = None
     status: Optional[AdStatusEnum] = None
     trial_location: Optional[List[Dict[str, Any]]] = None
+    patients_required: Optional[int] = None
 
 class QuestionnaireUpdate(BaseModel):
     questionnaire: Dict[str, Any]
@@ -323,9 +334,13 @@ class SkillOut(BaseModel):
 # ─── Bot Config Schemas ──────────────────────────────────────────────────────
 
 class BotConfigUpdate(BaseModel):
+    name: Optional[str] = None
+    welcome_message: Optional[str] = None
     conversation_style: Optional[str] = None
+    compliance_notes: Optional[str] = None
     voice: Optional[str] = None
     language: Optional[str] = None
+    allowed_origins: Optional[List[str]] = None   # restrict chat to these origins
     additional_params: Optional[Dict[str, Any]] = None
 
 
