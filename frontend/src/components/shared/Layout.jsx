@@ -37,7 +37,7 @@ import { useGeneration, GEN_STEPS } from "../../contexts/GenerationContext";
 import {
   LayoutDashboard, Users, FileText, BarChart3,
   LogOut, Shield, Eye, Megaphone, Globe, Bot,
-  Rocket, Share2, Sparkles, X, CheckCircle2,
+  Rocket, Share2, Sparkles, X, CheckCircle2, Activity,
 } from "lucide-react";
 
 // ─── RoleGuardedRoute ─────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ export function AppSidebar() {
       <div className="sidebar__brand">
         <div className="flex items-center gap-2.5">
           <div className="sidebar__logo-mark">
-            <div className="w-2.5 h-2.5 bg-gray-950 rounded-sm" />
+            <Activity size={14} color="white" strokeWidth={2.5} />
           </div>
           <span className="sidebar__app-name">ClinAds Pro</span>
         </div>
@@ -128,7 +128,6 @@ export function AppSidebar() {
             >
               <Icon size={16} />
               {link.label}
-              {isActive && <div className="ml-auto w-1 h-1 rounded-full bg-current opacity-60" />}
             </Link>
           );
         })}
@@ -376,7 +375,7 @@ export function PageWithSidebar({ children }) {
   return (
     <div className="flex min-h-screen" style={{ backgroundColor: "var(--color-page-bg)" }}>
       <AppSidebar />
-      <main className="flex-1 p-8 overflow-auto min-w-0">{children}</main>
+      <main className="flex-1 p-8 overflow-auto min-w-0 page-fade-in">{children}</main>
       <GenerationPill />
     </div>
   );
@@ -463,7 +462,7 @@ export function MetricSummaryCard({ label, value, icon: Icon, trend }) {
         <p className="metric-tile__label">{label}</p>
         {Icon && (
           <div className="metric-tile__icon-wrap">
-            <Icon size={15} style={{ color: "var(--color-sidebar-text)" }} />
+            <Icon size={15} style={{ color: "var(--color-accent)" }} />
           </div>
         )}
       </div>

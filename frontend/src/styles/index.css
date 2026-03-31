@@ -77,6 +77,9 @@
   --radius-input:  0.5rem;  /* 8px  — inputs, selects                      */
   --radius-btn:    0.5rem;  /* 8px  — buttons                              */
   --radius-badge:  9999px;  /* pill badges                                 */
+
+  /* Border alias — some components reference --color-border directly */
+  --color-border:  var(--color-card-border);
 }
 
 
@@ -89,6 +92,15 @@ body {
   color: var(--color-input-text);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Page-level fade-in — apply to top-level page wrappers */
+.page-fade-in {
+  animation: pageFadeIn 0.22s ease both;
+}
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -118,17 +130,21 @@ body {
    * Matches the OnboardingPage inputCls pattern exactly.
    */
   .field-input {
-    @apply w-full px-4 py-3 text-sm rounded-lg outline-none transition-colors;
+    @apply w-full px-4 py-3 text-sm rounded-lg outline-none;
     background-color:    var(--color-input-bg);
     border:              1px solid var(--color-input-border);
     color:               var(--color-input-text);
+    transition:          border-color 0.15s ease, box-shadow 0.15s ease;
   }
   .field-input::placeholder {
     color: var(--color-input-placeholder);
   }
+  .field-input:hover:not(:focus) {
+    border-color: #d1d5db;
+  }
   .field-input:focus {
     border-color: var(--color-accent);
-    box-shadow:   0 0 0 1px var(--color-accent);
+    box-shadow:   0 0 0 3px rgba(var(--color-accent-r), var(--color-accent-g), var(--color-accent-b), 0.12);
   }
 
   /*
@@ -152,8 +168,13 @@ body {
 
   /* Base — always pair with a variant */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 font-medium text-sm transition-colors disabled:opacity-40;
+    @apply inline-flex items-center justify-center gap-2 font-medium text-sm disabled:opacity-40;
     border-radius: var(--radius-btn);
+    transition: background-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  }
+  .btn:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
   }
 
   /*
@@ -230,6 +251,7 @@ body {
     background-color: var(--color-card-bg);
     border:           1px solid var(--color-card-border);
     border-radius:    var(--radius-card);
+    transition:       box-shadow 0.2s ease, border-color 0.2s ease;
   }
 
   .page-card__header {
@@ -262,6 +284,7 @@ body {
    * MetricSummaryCard wrapper — arrange 3-4 in a grid at page top.
    */
   .metric-tile { @apply page-card p-5; }
+  .metric-tile:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.07); }
 
   .metric-tile__label {
     @apply text-xs font-medium uppercase tracking-wide;
@@ -270,7 +293,7 @@ body {
   .metric-tile__value   { @apply text-2xl font-bold mt-2; color: var(--color-input-text); }
   .metric-tile__icon-wrap {
     @apply w-8 h-8 rounded-lg flex items-center justify-center;
-    background-color: var(--color-page-bg);
+    background-color: rgba(var(--color-accent-r), var(--color-accent-g), var(--color-accent-b), 0.08);
   }
   .metric-tile__trend--up   { @apply text-xs mt-1.5 font-medium; color: var(--color-accent-text); }
   .metric-tile__trend--down { @apply text-xs mt-1.5 font-medium; color: #dc2626; }
@@ -320,8 +343,9 @@ body {
   }
   .sidebar__nav-link--active {
     @apply sidebar__nav-link font-medium;
-    background-color: rgba(var(--color-accent-r), var(--color-accent-g), var(--color-accent-b), 0.1);
+    background-color: rgba(var(--color-accent-r), var(--color-accent-g), var(--color-accent-b), 0.12);
     color: var(--color-sidebar-text-active);
+    box-shadow: inset 2px 0 0 var(--color-accent);
   }
   .sidebar__signout {
     @apply flex items-center gap-3 px-6 py-4 text-sm transition-colors;
@@ -405,10 +429,11 @@ body {
   /* ── TABLE ROW ───────────────────────────────────────────────────────────── */
 
   .table-row {
-    @apply flex items-center justify-between py-3 border-b last:border-0 transition-colors;
+    @apply flex items-center justify-between py-3 border-b last:border-0;
     border-color: var(--color-card-border);
+    transition: background-color 0.15s ease, padding-left 0.15s ease;
   }
-  .table-row:hover  { background-color: var(--color-page-bg); }
+  .table-row:hover  { background-color: var(--color-page-bg); padding-left: 4px; }
   .table-row__title { @apply text-sm font-medium; color: var(--color-input-text); }
   .table-row__meta  { @apply text-xs mt-0.5;      color: var(--color-sidebar-text); }
 
@@ -528,7 +553,11 @@ body {
     background-color: var(--color-card-bg);
   }
   .pub-campaign-row + .pub-campaign-row { @apply mt-2; }
-  .pub-campaign-row:hover { border-color: var(--color-input-border); background-color: var(--color-page-bg); }
+  .pub-campaign-row:hover {
+    border-color: rgba(var(--color-accent-r), var(--color-accent-g), var(--color-accent-b), 0.3);
+    background-color: var(--color-page-bg);
+    box-shadow: 0 2px 8px rgba(var(--color-accent-r), var(--color-accent-g), var(--color-accent-b), 0.06);
+  }
 
   .pub-campaign-row__dot {
     @apply w-2 h-2 rounded-full shrink-0;
@@ -549,6 +578,44 @@ body {
     @apply text-xs font-semibold uppercase tracking-wide mb-2;
     color: var(--color-sidebar-text);
   }
+
+
+  /* ── EMPTY STATE ─────────────────────────────────────────────────────────── */
+
+  /*
+   * .empty-state
+   * Centered placeholder when a list / table has no data.
+   * Use inside any SectionCard body.
+   */
+  .empty-state {
+    @apply flex flex-col items-center justify-center text-center py-16 gap-3;
+  }
+  .empty-state__icon {
+    color: var(--color-card-border);
+    opacity: 0.6;
+  }
+  .empty-state__text {
+    @apply text-sm font-medium;
+    color: var(--color-sidebar-text);
+  }
+  .empty-state__hint {
+    @apply text-xs;
+    color: var(--color-input-placeholder);
+  }
+
+
+  /* ── REJECT / REDESIGN BUTTON ────────────────────────────────────────────── */
+
+  /*
+   * .btn--reject  (red-tinted — for "Redesign Strategy" / reject actions)
+   */
+  .btn--reject {
+    @apply btn px-5 py-2.5;
+    background-color: #fef2f2;
+    color:            #dc2626;
+    border:           1px solid #fecaca;
+  }
+  .btn--reject:hover:not(:disabled) { background-color: #fee2e2; }
 
 
   /* ── AD PREVIEW MODAL ────────────────────────────────────────────────────── */

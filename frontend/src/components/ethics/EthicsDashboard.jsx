@@ -114,7 +114,7 @@ function StrategySection({ icon: Icon, title, children, isOpen, onToggle }) {
           border: "none", cursor: "pointer", textAlign: "left",
         }}
       >
-        <Icon size={15} style={{ color: "var(--color-primary, #166534)", flexShrink: 0 }} />
+        <Icon size={15} style={{ color: "var(--color-accent)", flexShrink: 0 }} />
         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-input-text, #111)", flex: 1 }}>{title}</span>
         {isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
       </button>
@@ -297,7 +297,7 @@ function StrategyViewer({ strategy }) {
       {s.messaging && (
         <StrategySection icon={MessageSquare} title="Messaging" isOpen={openSection === "messaging"} onToggle={() => toggle("messaging")}>
           {s.messaging.core_message && (
-            <div style={{ background: "var(--color-primary-light, #dcfce7)", borderLeft: "3px solid var(--color-primary, #166534)", padding: "12px 16px", borderRadius: 6, marginBottom: 14, fontStyle: "italic", color: "var(--color-primary, #166534)", fontWeight: 500, lineHeight: 1.6 }}>
+            <div style={{ background: "var(--color-accent-subtle)", borderLeft: "3px solid var(--color-accent)", padding: "12px 16px", borderRadius: 6, marginBottom: 14, fontStyle: "italic", color: "var(--color-accent-text)", fontWeight: 500, lineHeight: 1.6 }}>
               "{s.messaging.core_message}"
             </div>
           )}

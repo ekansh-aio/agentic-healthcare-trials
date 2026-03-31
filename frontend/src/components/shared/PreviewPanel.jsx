@@ -395,14 +395,7 @@ export default function PreviewPanel({ ads }) {
 
               {/* Error banner */}
               {error && (
-                <div style={{
-                  fontSize: 13, color: "#ef4444",
-                  padding: "10px 14px", borderRadius: 8,
-                  backgroundColor: "rgba(239,68,68,0.08)",
-                  border: "1px solid rgba(239,68,68,0.2)",
-                }}>
-                  {error}
-                </div>
+                <div className="alert--error">{error}</div>
               )}
 
               {/* Instructions */}
@@ -440,16 +433,7 @@ export default function PreviewPanel({ ads }) {
                 <button
                   onClick={() => handleRegen("website")}
                   disabled={!!regenState}
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: 7,
-                    padding: "8px 16px", borderRadius: 8, fontSize: 13,
-                    fontWeight: 500, cursor: regenState ? "not-allowed" : "pointer",
-                    border: "1px solid var(--color-card-border)",
-                    backgroundColor: "var(--color-card-bg)",
-                    color: "var(--color-input-text)",
-                    opacity: regenState ? 0.55 : 1,
-                    transition: "opacity 0.15s",
-                  }}
+                  className="btn--ghost"
                 >
                   {regenState === "website"
                     ? <Loader2 size={14} style={{ animation: "spin 0.75s linear infinite" }} />
@@ -477,8 +461,9 @@ export default function PreviewPanel({ ads }) {
       ) : (
         <SectionCard>
           <div className="empty-state">
-            <MonitorSmartphone size={48} className="empty-state__icon" />
-            <p className="empty-state__text">Select a campaign to preview its creatives and website</p>
+            <MonitorSmartphone size={40} className="empty-state__icon" />
+            <p className="empty-state__text">Select a campaign to preview</p>
+            <p className="empty-state__hint">Ad creatives and website will appear here</p>
           </div>
         </SectionCard>
       )}
