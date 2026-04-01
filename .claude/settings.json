@@ -7,7 +7,9 @@
       "Bash(docker-compose up:*)",
       "Bash(docker-compose logs:*)",
       "Bash(curl -s -X POST http://localhost:8001/api/auth/login -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"silverhandjohnny40@gmail.com\"\",\"\"password\"\":\"\"Admin@123\"\",\"\"company\"\":\"\"testing\"\",\"\"role\"\":\"\"study_coordinator\"\"}')",
-      "Bash(docker exec health_care_agentic-backend-1 python -c \":*)"
+      "Bash(docker exec health_care_agentic-backend-1 python -c \":*)",
+      "Bash(docker exec health_care_agentic-backend-1 python -c ':*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8001/static/pages/)"
     ]
   }
 }

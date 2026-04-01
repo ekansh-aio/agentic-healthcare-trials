@@ -354,3 +354,7 @@ class MinorEditRequest(BaseModel):
 
 class RewriteStrategyRequest(BaseModel):
     instructions: str
+
+class RewriteQuestionRequest(BaseModel):
+    question: dict
+    instruction: str

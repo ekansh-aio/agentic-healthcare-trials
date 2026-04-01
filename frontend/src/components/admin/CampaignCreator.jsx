@@ -21,7 +21,7 @@ import { useNavigate } from "react-router-dom";
 import { PageWithSidebar, SectionCard } from "../shared/Layout";
 import { adsAPI, companyAPI } from "../../services/api";
 import { useGeneration } from "../../contexts/GenerationContext";
-import { Sparkles, FileText, X, Upload, MapPin, ChevronDown, Check, Users, Megaphone, ArrowLeft, ArrowRight, Plus } from "lucide-react";
+import { Sparkles, FileText, X, Upload, MapPin, ChevronDown, Check, Megaphone, ArrowLeft, ArrowRight, Plus } from "lucide-react";
 
 
 // Accepted MIME types and their display labels
@@ -491,7 +491,7 @@ function LocationMultiPicker({ locations, companyLocations, onChange }) {
           {selCountry && companyCitiesForSel.length > 0 ? (
             <div style={{ position: "relative" }}>
               <select value={selCity} onChange={(e) => setSelCity(e.target.value)} className="field-input" style={{ appearance: "none", paddingRight: 28, marginBottom: 0 }}>
-                <option value="">Whole country</option>
+                <option value="">All locations</option>
                 {companyCitiesForSel.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
               <ChevronDown size={12} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--color-sidebar-text)", pointerEvents: "none" }} />
@@ -512,20 +512,20 @@ function LocationMultiPicker({ locations, companyLocations, onChange }) {
 // All four output types (website, ads, voicebot, chatbot) are always enabled.
 const CAMPAIGN_GROUPS = [
   {
+    label: "Social & Engagement Campaigns",
+    options: [
+      { value: "smm",                 label: "Social Media Marketing (SMM)" },
+      { value: "short_form_video",    label: "Short-form Video",                disabled: true },
+      { value: "influencer_affiliate",label: "Influencer & Affiliate Marketing", disabled: true },
+    ],
+  },
+  {
     label: "Search & Intent-Based Campaigns",
     options: [
       { value: "seo",              label: "Search Engine Optimization (SEO)" },
       { value: "sge",              label: "Search Generative Experience (SGE)" },
       { value: "ppc_sem",          label: "Pay-Per-Click (PPC / SEM)" },
       { value: "performance_max",  label: "Performance Max" },
-    ],
-  },
-  {
-    label: "Social & Engagement Campaigns",
-    options: [
-      { value: "smm",                        label: "Social Media Marketing (SMM)" },
-      { value: "short_form_video",            label: "Short-form Video" },
-      { value: "influencer_affiliate",        label: "Influencer & Affiliate Marketing" },
     ],
   },
   {
@@ -539,9 +539,9 @@ const CAMPAIGN_GROUPS = [
   {
     label: "Retention & Direct Action Campaigns",
     options: [
-      { value: "email_marketing",       label: "Email Marketing" },
-      { value: "remarketing_retargeting", label: "Remarketing / Retargeting" },
-      { value: "mobile_marketing",      label: "Mobile Marketing" },
+      { value: "email_marketing",        label: "Email Marketing" },
+      { value: "remarketing_retargeting",label: "Remarketing / Retargeting" },
+      { value: "mobile_marketing",       label: "Mobile Marketing" },
     ],
   },
 ];
@@ -561,6 +561,7 @@ export default function CampaignCreator() {
   const [loading,    setLoading]    = useState(false);
   const [createdAd,  setCreatedAd]  = useState(null);
   const [uploadProgress, setUploadProgress] = useState("");
+  const [openGroupDropdown, setOpenGroupDropdown] = useState(null); // group label of open dropdown
 
   const [companyLocations, setCompanyLocations] = useState([]);  // [{ country, cities }]
 
@@ -570,11 +571,20 @@ export default function CampaignCreator() {
       .catch(() => {});
   }, []);
 
+  // Close group dropdown when clicking outside
+  useEffect(() => {
+    if (!openGroupDropdown) return;
+    const handler = () => setOpenGroupDropdown(null);
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, [openGroupDropdown]);
+
   const [form, setForm] = useState({
     title: "",
     ad_types: ["website", "ads", "voicebot", "chatbot"], // always all four
     campaign_category: "",
     social_platforms: [], // populated via SMM branch in Step 1
+    first_visit_duration: "", // e.g. "01:30"
     budget: "",
     start_date: "",
     end_date: "",
@@ -583,6 +593,7 @@ export default function CampaignCreator() {
     target_audience: { age_range: "", gender: "", interests: "" },
     trial_location: [],
     protocol_docs: [],
+    special_instructions: "",
   });
 
   const addProtocolDocs   = (incoming) => setForm((p) => ({ ...p, protocol_docs: [...p.protocol_docs, ...incoming] }));
@@ -639,7 +650,8 @@ export default function CampaignCreator() {
         trial_end_date:    form.end_date || null,
         target_audience:   form.target_audience,
         trial_location:    form.trial_location.length > 0 ? form.trial_location : null,
-        patients_required: form.patients_required ? parseInt(form.patients_required, 10) : null,
+        patients_required:    form.patients_required ? parseInt(form.patients_required, 10) : null,
+        special_instructions: form.special_instructions.trim() || null,
       });
 
       // Step 2 — upload each protocol document scoped to this campaign
@@ -672,9 +684,8 @@ export default function CampaignCreator() {
     { id: 1, label: "Campaign Type",  icon: Megaphone  },
     { id: 2, label: "Trial Details",  icon: FileText   },
     { id: 3, label: "Location",       icon: MapPin     },
-    { id: 4, label: "Audience",       icon: Users      },
-    { id: 5, label: "Documents",      icon: Upload     },
-    { id: 6, label: "Review",         icon: Check      },
+    { id: 4, label: "Documents",      icon: Upload     },
+    { id: 5, label: "Review",         icon: Check      },
   ];
 
   const canNext = () => {
@@ -833,126 +844,198 @@ export default function CampaignCreator() {
           {/* ── Step 1: Campaign Type ─────────────────────────────────────── */}
           {step === 1 && (
             <SectionCard title="Campaign Type" subtitle="Choose the marketing strategy that best fits your campaign.">
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 {CAMPAIGN_GROUPS.map((group) => {
                   const enabled = group.label === "Social & Engagement Campaigns";
-                  const groupActive = group.options.some(o => o.value === form.campaign_category);
+                  const selectedOpt = group.options.find(o => o.value === form.campaign_category);
+                  const groupActive = !!selectedOpt;
+                  const isOpen = openGroupDropdown === group.label;
+                  const isSmmActive = groupActive && selectedOpt?.value === "smm";
+
                   return (
-                    <div
-                      key={group.label}
-                      style={{
-                        borderRadius: 12,
-                        border: `2px solid ${groupActive ? "var(--color-accent)" : "var(--color-card-border)"}`,
-                        backgroundColor: groupActive ? "var(--color-accent-subtle)" : "var(--color-card-bg)",
-                        padding: "18px 20px",
-                        transition: "border-color 0.15s, background-color 0.15s",
-                        opacity: enabled ? 1 : 0.45,
-                        position: "relative",
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8, marginBottom: 14 }}>
-                        <p style={{
-                          fontSize: "0.82rem", fontWeight: 700,
-                          color: "var(--color-accent)",
-                          lineHeight: 1.3, margin: 0,
-                        }}>
-                          {group.label}
-                        </p>
-                        {!enabled && (
+                    <div key={group.label} style={{ position: "relative" }}>
+                      {/* ── Horizontal block row ── */}
+                      <div
+                        style={{
+                          display: "flex", alignItems: "center", gap: 16,
+                          padding: "16px 20px",
+                          borderRadius: 12,
+                          border: `2px solid ${groupActive ? "var(--color-accent)" : "var(--color-card-border)"}`,
+                          backgroundColor: groupActive ? "var(--color-accent-subtle)" : "var(--color-card-bg)",
+                          transition: "border-color 0.15s, background-color 0.15s",
+                          opacity: enabled ? 1 : 0.45,
+                          cursor: enabled ? "pointer" : "not-allowed",
+                        }}
+                        onClick={(e) => {
+                          if (!enabled) return;
+                          e.stopPropagation();
+                          setOpenGroupDropdown(isOpen ? null : group.label);
+                        }}
+                      >
+                        {/* Left: group label */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{
+                            margin: 0, fontSize: "0.88rem", fontWeight: 700,
+                            color: groupActive ? "var(--color-accent)" : "var(--color-input-text)",
+                            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                          }}>
+                            {group.label}
+                          </p>
+                          {selectedOpt && (
+                            <p style={{ margin: "3px 0 0", fontSize: "0.76rem", color: "var(--color-sidebar-text)", fontWeight: 400 }}>
+                              {selectedOpt.label}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Right: coming-soon badge or dropdown trigger */}
+                        {!enabled ? (
                           <span style={{
                             flexShrink: 0, fontSize: "0.65rem", fontWeight: 600,
-                            padding: "2px 7px", borderRadius: 4,
+                            padding: "3px 8px", borderRadius: 4,
                             backgroundColor: "var(--color-btn-ghost-bg)",
                             color: "var(--color-sidebar-text)",
                             whiteSpace: "nowrap",
                           }}>
                             Coming Soon
                           </span>
+                        ) : (
+                          <div style={{
+                            flexShrink: 0, display: "flex", alignItems: "center", gap: 8,
+                          }}>
+                            {groupActive && (
+                              <span style={{
+                                width: 18, height: 18, borderRadius: "50%",
+                                backgroundColor: "var(--color-accent)",
+                                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                              }}>
+                                <Check size={10} strokeWidth={3} color="#fff" />
+                              </span>
+                            )}
+                            <span style={{
+                              fontSize: "0.76rem", fontWeight: 500,
+                              color: groupActive ? "var(--color-accent)" : "var(--color-sidebar-text)",
+                              minWidth: 110, textAlign: "right",
+                            }}>
+                              {selectedOpt ? selectedOpt.label : "Select option"}
+                            </span>
+                            <ChevronDown
+                              size={15}
+                              style={{
+                                color: "var(--color-sidebar-text)",
+                                transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+                                transition: "transform 0.2s",
+                              }}
+                            />
+                          </div>
                         )}
                       </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {group.options.map((opt, i) => {
-                          const isActive = form.campaign_category === opt.value;
-                          const isSmmActive = isActive && opt.value === "smm";
-                          return (
-                            <React.Fragment key={opt.value}>
+
+                      {/* ── Dropdown panel ── */}
+                      {isOpen && enabled && (
+                        <div style={{
+                          position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0,
+                          zIndex: 50,
+                          borderRadius: 10,
+                          border: "1px solid var(--color-card-border)",
+                          backgroundColor: "var(--color-card-bg)",
+                          boxShadow: "0 8px 24px rgba(0,0,0,0.28)",
+                          overflow: "hidden",
+                        }}>
+                          {group.options.map((opt) => {
+                            const isActive = form.campaign_category === opt.value;
+                            const optDisabled = !!opt.disabled;
+                            return (
                               <div
-                                onClick={() => enabled && update("campaign_category", opt.value)}
-                                style={{
-                                  display: "flex", alignItems: "center", gap: 8,
-                                  cursor: enabled ? "pointer" : "not-allowed",
-                                  userSelect: "none",
+                                key={opt.value}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (optDisabled) return;
+                                  update("campaign_category", opt.value);
+                                  setOpenGroupDropdown(null);
                                 }}
+                                style={{
+                                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                                  gap: 10, padding: "11px 18px",
+                                  cursor: optDisabled ? "not-allowed" : "pointer",
+                                  opacity: optDisabled ? 0.4 : 1,
+                                  backgroundColor: isActive ? "var(--color-accent-subtle)" : "transparent",
+                                  borderBottom: "1px solid var(--color-card-border)",
+                                  transition: "background-color 0.1s",
+                                }}
+                                onMouseEnter={(e) => { if (!optDisabled && !isActive) e.currentTarget.style.backgroundColor = "var(--color-btn-ghost-bg)"; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = isActive ? "var(--color-accent-subtle)" : "transparent"; }}
                               >
                                 <span style={{
-                                  fontSize: "0.82rem",
-                                  color: isActive ? "var(--color-input-text)" : "var(--color-sidebar-text)",
+                                  fontSize: "0.83rem",
                                   fontWeight: isActive ? 600 : 400,
-                                  lineHeight: 1.4,
+                                  color: isActive ? "var(--color-accent)" : "var(--color-input-text)",
                                 }}>
-                                  {i + 1}. {opt.label}
+                                  {opt.label}
                                 </span>
-                                {isActive && (
-                                  <span style={{
-                                    flexShrink: 0,
-                                    width: 14, height: 14, borderRadius: "50%",
-                                    backgroundColor: "var(--color-accent)",
-                                    display: "inline-flex", alignItems: "center", justifyContent: "center",
-                                  }}>
-                                    <Check size={9} strokeWidth={3} color="#fff" />
-                                  </span>
-                                )}
-                              </div>
-
-                              {/* ── SMM branch: social platform picker ── */}
-                              {isSmmActive && (
-                                <div style={{
-                                  marginTop: 4, marginLeft: 16,
-                                  padding: "14px 16px",
-                                  borderRadius: 10,
-                                  border: "1px solid var(--color-card-border)",
-                                  backgroundColor: "var(--color-page-bg, #0f1620)",
-                                }}>
-                                  <p style={{
-                                    fontSize: "0.72rem", fontWeight: 700,
-                                    textTransform: "uppercase", letterSpacing: "0.06em",
-                                    color: "var(--color-sidebar-text)", marginBottom: 10,
-                                  }}>
-                                    Select target platforms
-                                  </p>
-                                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                                    {SOCIAL_PLATFORMS.map((sp) => {
-                                      const spActive = form.social_platforms.includes(sp);
-                                      return (
-                                        <button
-                                          key={sp}
-                                          type="button"
-                                          onClick={(e) => { e.stopPropagation(); toggleSocialPlatform(sp); }}
-                                          style={{
-                                            padding: "5px 12px", borderRadius: 999, fontSize: "0.78rem",
-                                            fontWeight: spActive ? 600 : 400, cursor: "pointer",
-                                            border: `1.5px solid ${spActive ? "var(--color-accent)" : "var(--color-card-border)"}`,
-                                            backgroundColor: spActive ? "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.12)" : "transparent",
-                                            color: spActive ? "var(--color-accent)" : "var(--color-sidebar-text)",
-                                            transition: "all 0.15s",
-                                          }}
-                                        >
-                                          {sp}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                  {form.social_platforms.length > 0 && (
-                                    <p style={{ fontSize: "0.72rem", marginTop: 10, color: "var(--color-accent)", fontWeight: 500 }}>
-                                      {form.social_platforms.length} platform{form.social_platforms.length !== 1 ? "s" : ""} selected
-                                    </p>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  {optDisabled && (
+                                    <span style={{
+                                      fontSize: "0.62rem", fontWeight: 600, padding: "2px 6px",
+                                      borderRadius: 4, backgroundColor: "var(--color-btn-ghost-bg)",
+                                      color: "var(--color-sidebar-text)", whiteSpace: "nowrap",
+                                    }}>
+                                      Coming Soon
+                                    </span>
                                   )}
+                                  {isActive && <Check size={13} strokeWidth={2.5} style={{ color: "var(--color-accent)", flexShrink: 0 }} />}
                                 </div>
-                              )}
-                            </React.Fragment>
-                          );
-                        })}
-                      </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* ── SMM branch: social platform picker (below block) ── */}
+                      {isSmmActive && (
+                        <div style={{
+                          marginTop: 8,
+                          padding: "14px 18px",
+                          borderRadius: 10,
+                          border: "1px solid var(--color-card-border)",
+                          backgroundColor: "var(--color-page-bg, #0f1620)",
+                        }}>
+                          <p style={{
+                            fontSize: "0.72rem", fontWeight: 700,
+                            textTransform: "uppercase", letterSpacing: "0.06em",
+                            color: "var(--color-sidebar-text)", marginBottom: 10,
+                          }}>
+                            Select target platforms
+                          </p>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                            {SOCIAL_PLATFORMS.map((sp) => {
+                              const spActive = form.social_platforms.includes(sp);
+                              return (
+                                <button
+                                  key={sp}
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); toggleSocialPlatform(sp); }}
+                                  style={{
+                                    padding: "5px 12px", borderRadius: 999, fontSize: "0.78rem",
+                                    fontWeight: spActive ? 600 : 400, cursor: "pointer",
+                                    border: `1.5px solid ${spActive ? "var(--color-accent)" : "var(--color-card-border)"}`,
+                                    backgroundColor: spActive ? "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.12)" : "transparent",
+                                    color: spActive ? "var(--color-accent)" : "var(--color-sidebar-text)",
+                                    transition: "all 0.15s",
+                                  }}
+                                >
+                                  {sp}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {form.social_platforms.length > 0 && (
+                            <p style={{ fontSize: "0.72rem", marginTop: 10, color: "var(--color-accent)", fontWeight: 500 }}>
+                              {form.social_platforms.length} platform{form.social_platforms.length !== 1 ? "s" : ""} selected
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1009,6 +1092,38 @@ export default function CampaignCreator() {
                     </div>
                   )}
                 </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: "var(--color-input-text)" }}>
+                    First Visit Duration <span style={{ fontWeight: 400, color: "var(--color-sidebar-text)" }}>(optional)</span>
+                  </label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <input
+                      type="time"
+                      value={form.first_visit_duration}
+                      onChange={(e) => update("first_visit_duration", e.target.value)}
+                      className="field-input"
+                      style={{ maxWidth: 160 }}
+                    />
+                    {form.first_visit_duration && (
+                      <span style={{
+                        display: "inline-flex", alignItems: "center", gap: 6,
+                        padding: "5px 12px", borderRadius: 999, fontSize: "0.78rem",
+                        fontWeight: 500, backgroundColor: "rgba(16,185,129,0.1)",
+                        border: "1px solid var(--color-accent)", color: "var(--color-accent)",
+                      }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        {(() => {
+                          const [h, m] = form.first_visit_duration.split(":").map(Number);
+                          const parts = [];
+                          if (h) parts.push(`${h}h`);
+                          if (m) parts.push(`${m}min`);
+                          return parts.join(" ");
+                        })()}
+                      </span>
+                    )}
+                  </div>
+                </div>
               </div>
               <NavBar />
             </SectionCard>
@@ -1026,64 +1141,16 @@ export default function CampaignCreator() {
             </SectionCard>
           )}
 
-          {/* ── Step 4: Audience ────────────────────────────── */}
+          {/* ── Step 4: Documents ─────────────────────────────────────────── */}
           {step === 4 && (
-            <SectionCard title="Target Audience" subtitle="Define who you want to reach.">
-              <div className="space-y-5">
-                {/* Social platforms summary — shown if SMM was selected in Step 1 */}
-                {form.campaign_category === "smm" && form.social_platforms.length > 0 && (
-                  <div style={{
-                    padding: "12px 16px", borderRadius: 10,
-                    border: "1px solid var(--color-card-border)",
-                    backgroundColor: "var(--color-card-bg)",
-                  }}>
-                    <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-sidebar-text)", marginBottom: 8 }}>
-                      Social Platforms
-                    </p>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {form.social_platforms.map(sp => (
-                        <span key={sp} style={{
-                          padding: "3px 10px", borderRadius: 999, fontSize: "0.78rem", fontWeight: 500,
-                          border: "1.5px solid var(--color-accent)",
-                          backgroundColor: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.12)",
-                          color: "var(--color-accent)",
-                        }}>
-                          {sp}
-                        </span>
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setStep(1)}
-                      style={{ marginTop: 8, background: "none", border: "none", cursor: "pointer", fontSize: "0.72rem", color: "var(--color-sidebar-text)", padding: 0, textDecoration: "underline" }}
-                    >
-                      Edit in Step 1
-                    </button>
-                  </div>
-                )}
-                <div>
-                  <label className="block text-sm font-medium mb-2" style={{ color: "var(--color-input-text)" }}>Audience Details</label>
-                  <div className="grid grid-cols-3 gap-4">
-                    <input placeholder="Age Range (e.g. 25-45)" value={form.target_audience.age_range} onChange={(e) => update("target_audience", { ...form.target_audience, age_range: e.target.value })} className="field-input" />
-                    <input placeholder="Gender" value={form.target_audience.gender} onChange={(e) => update("target_audience", { ...form.target_audience, gender: e.target.value })} className="field-input" />
-                    <input placeholder="Interests" value={form.target_audience.interests} onChange={(e) => update("target_audience", { ...form.target_audience, interests: e.target.value })} className="field-input" />
-                  </div>
-                </div>
-              </div>
-              <NavBar />
-            </SectionCard>
-          )}
-
-          {/* ── Step 5: Documents ─────────────────────────────────────────── */}
-          {step === 5 && (
             <SectionCard title="Protocol Documents" subtitle="Upload product/service descriptions, requirements, or any brief. The AI curator uses these as high-priority context.">
               <ProtocolDocsSection docs={form.protocol_docs} onAdd={addProtocolDocs} onChange={updateProtocolDoc} onRemove={removeProtocolDoc} />
               <NavBar />
             </SectionCard>
           )}
 
-          {/* ── Step 6: Review & Create ───────────────────────────────────── */}
-          {step === 6 && (
+          {/* ── Step 5: Review & Create ───────────────────────────────────── */}
+          {step === 5 && (
             <div className="space-y-6">
 
               {/* Campaign Type */}
@@ -1155,38 +1222,21 @@ export default function CampaignCreator() {
                 />
               </SectionCard>
 
-              {/* Audience */}
-              <SectionCard title="Target Audience" actions={<button type="button" onClick={() => setStep(4)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-accent)", fontSize: "0.78rem", fontWeight: 600 }}>Edit</button>}>
-                <div className="space-y-4">
-                  {form.campaign_category === "smm" && form.social_platforms.length > 0 && (
-                    <div>
-                      <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-sidebar-text)", marginBottom: 8 }}>Social Platforms</p>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {form.social_platforms.map(sp => (
-                          <span key={sp} style={{
-                            padding: "3px 10px", borderRadius: 999, fontSize: "0.78rem", fontWeight: 500,
-                            border: "1.5px solid var(--color-accent)",
-                            backgroundColor: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.12)",
-                            color: "var(--color-accent)",
-                          }}>{sp}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <div>
-                    <label className="block text-sm font-medium mb-2" style={{ color: "var(--color-input-text)" }}>Audience Details</label>
-                    <div className="grid grid-cols-3 gap-4">
-                      <input placeholder="Age Range (e.g. 25-45)" value={form.target_audience.age_range} onChange={(e) => update("target_audience", { ...form.target_audience, age_range: e.target.value })} className="field-input" />
-                      <input placeholder="Gender" value={form.target_audience.gender} onChange={(e) => update("target_audience", { ...form.target_audience, gender: e.target.value })} className="field-input" />
-                      <input placeholder="Interests" value={form.target_audience.interests} onChange={(e) => update("target_audience", { ...form.target_audience, interests: e.target.value })} className="field-input" />
-                    </div>
-                  </div>
-                </div>
-              </SectionCard>
-
               {/* Documents */}
               <SectionCard title="Protocol Documents" subtitle="Upload product/service descriptions, requirements, or any brief. The AI curator uses these as high-priority context.">
                 <ProtocolDocsSection docs={form.protocol_docs} onAdd={addProtocolDocs} onChange={updateProtocolDoc} onRemove={removeProtocolDoc} />
+              </SectionCard>
+
+              {/* Special Instructions */}
+              <SectionCard title="Special Instructions" subtitle="Anything the AI should keep in mind while generating the strategy, ads, and landing page.">
+                <textarea
+                  value={form.special_instructions}
+                  onChange={(e) => update("special_instructions", e.target.value)}
+                  placeholder="e.g. Use a compassionate and reassuring tone. Avoid medical jargon. Highlight patient safety above all else."
+                  className="field-textarea"
+                  rows={4}
+                  style={{ width: "100%", resize: "vertical" }}
+                />
               </SectionCard>
 
               {uploadProgress && (

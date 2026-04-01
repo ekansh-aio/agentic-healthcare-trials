@@ -18,12 +18,15 @@ from app.core.config import settings
 async def _security_headers(request: Request, call_next):
     response: Response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     if not settings.DEBUG:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    # Hosted landing pages (/static/pages/*) are public and may embed widgets —
+    # skip X-Frame-Options for those paths only.
+    if not request.url.path.startswith("/static/pages/"):
+        response.headers["X-Frame-Options"] = "DENY"
     return response
 
 

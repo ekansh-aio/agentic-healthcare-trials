@@ -27,20 +27,12 @@ import {
   Layers, TrendingUp, List, Send, Sparkles,
   RefreshCw, CheckCircle2, BarChart2, Zap, MessageCircle,
   FileText, ClipboardList, Eye, Calendar, LayoutDashboard,
-  History, ClipboardCheck, Download, X,
+  History, ClipboardCheck, Download, X, Check,
 } from "lucide-react";
+import { useAuth } from "../../contexts/AuthContext";
 
-const QUESTIONNAIRE_CATEGORIES = new Set(["recruitment", "hiring", "survey", "clinical_trial", "research"]);
-
-const QUESTIONNAIRE_KEYWORDS = ["hiring", "recruit", "survey", "clinical", "trial", "research study", "job posting", "job opening", "application", "vacancy", "vacancies", "applicant", "enroll", "enrolment", "participant", "respondent"];
-
-function needsQuestionnaire(ad, docs = []) {
-  if (!ad) return false;
-  if (QUESTIONNAIRE_CATEGORIES.has(ad.campaign_category)) return true;
-  const docText = docs.map((d) => `${d.title ?? ""} ${d.doc_type ?? ""}`).join(" ").toLowerCase();
-  if (docText && QUESTIONNAIRE_KEYWORDS.some((kw) => docText.includes(kw))) return true;
-  const title = (ad.title ?? "").toLowerCase();
-  return QUESTIONNAIRE_KEYWORDS.some((kw) => title.includes(kw));
+function needsQuestionnaire(ad) {
+  return !!ad;
 }
 
 const QUESTION_TYPE_LABELS = {
@@ -409,7 +401,7 @@ function ContentPlanTable({ items }) {
 
 // ─── Questionnaire viewer (read-only) ─────────────────────────────────────────
 
-function QuestionnaireViewer({ questionnaire, adId, onGenerated }) {
+function QuestionnaireViewer({ questionnaire, adId, onGenerated, role }) {
   const saved = questionnaire?.questions ?? [];
   const [questions, setQuestions] = useState(saved);
   const [dirty,     setDirty]     = useState(false);
@@ -419,8 +411,10 @@ function QuestionnaireViewer({ questionnaire, adId, onGenerated }) {
   const [saveErr,   setSaveErr]   = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError,   setAiError]   = useState(null);
+  const [rewriteStates, setRewriteStates] = useState({});
 
-  // Keep in sync when parent reloads after AI generation
+  const isPM = role === "project_manager";
+
   useEffect(() => {
     setQuestions(questionnaire?.questions ?? []);
     setDirty(false);
@@ -434,6 +428,13 @@ function QuestionnaireViewer({ questionnaire, adId, onGenerated }) {
   const updateOption = (id, oi, val) => {
     setQuestions((prev) => prev.map((q) =>
       q.id === id ? { ...q, options: q.options.map((o, i) => i === oi ? val : o) } : q
+    ));
+    setDirty(true); setSaveOk(false);
+  };
+
+  const setCorrectOption = (id, oi) => {
+    setQuestions((prev) => prev.map((q) =>
+      q.id === id ? { ...q, correct_option: q.correct_option === oi ? null : oi } : q
     ));
     setDirty(true); setSaveOk(false);
   };
@@ -466,34 +467,55 @@ function QuestionnaireViewer({ questionnaire, adId, onGenerated }) {
     }
   };
 
+  const toggleRewrite = (qId) =>
+    setRewriteStates((prev) => ({
+      ...prev,
+      [qId]: { open: !prev[qId]?.open, prompt: prev[qId]?.prompt ?? "", loading: false, error: null },
+    }));
+
+  const setRewritePrompt = (qId, val) =>
+    setRewriteStates((prev) => ({ ...prev, [qId]: { ...prev[qId], prompt: val } }));
+
+  const submitRewrite = async (q) => {
+    const state = rewriteStates[q.id] ?? {};
+    if (!state.prompt?.trim()) return;
+    setRewriteStates((prev) => ({ ...prev, [q.id]: { ...prev[q.id], loading: true, error: null } }));
+    try {
+      const res = await adsAPI.rewriteQuestion(adId, q, state.prompt.trim());
+      const updated = res.question;
+      setQuestions((prev) => prev.map((item) => item.id === q.id ? { ...updated, id: q.id } : item));
+      setRewriteStates((prev) => ({ ...prev, [q.id]: { open: false, prompt: "", loading: false, error: null } }));
+      setDirty(true);
+    } catch (err) {
+      setRewriteStates((prev) => ({ ...prev, [q.id]: { ...prev[q.id], loading: false, error: err.message || "Rewrite failed." } }));
+    }
+  };
+
   const inputBase = {
     width: "100%", padding: "6px 10px", borderRadius: "7px", fontSize: "0.83rem",
     border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-input-bg)",
     color: "var(--color-input-text)", outline: "none", boxSizing: "border-box",
     fontFamily: "inherit",
   };
-  const answerPlaceholder = {
-    padding: "7px 10px", borderRadius: "7px", fontSize: "0.82rem",
-    border: "1px solid var(--color-card-border)",
-    backgroundColor: "var(--color-page-bg)",
-    color: "var(--color-sidebar-text)", fontStyle: "italic",
-  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
 
-      {/* Top action bar — always visible */}
+      {/* Top action bar */}
       <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-        <button
-          onClick={generateWithAI}
-          disabled={aiLoading || saving}
-          className="btn--accent"
-          style={{ display: "inline-flex", alignItems: "center", gap: "6px", opacity: (aiLoading || saving) ? 0.7 : 1 }}
-        >
-          {aiLoading ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles size={13} />}
-          {aiLoading ? "Generating…" : questions.length ? "Regenerate Questions" : "Generate Questions"}
-        </button>
-        <InlineProgress progress={qProgress.progress} />
+        {/* AI regenerate — PM only */}
+        {isPM && (
+          <button
+            onClick={generateWithAI}
+            disabled={aiLoading || saving}
+            className="btn--accent"
+            style={{ display: "inline-flex", alignItems: "center", gap: "6px", opacity: (aiLoading || saving) ? 0.7 : 1 }}
+          >
+            {aiLoading ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles size={13} />}
+            {aiLoading ? "Generating…" : questions.length ? "Regenerate Questions" : "Generate Questions"}
+          </button>
+        )}
+        {isPM && <InlineProgress progress={qProgress.progress} />}
 
         {dirty && (
           <button
@@ -521,20 +543,20 @@ function QuestionnaireViewer({ questionnaire, adId, onGenerated }) {
         </div>
       )}
 
-      {/* Empty state */}
       {!questions.length && !aiLoading && (
         <p style={{ fontSize: "0.82rem", color: "var(--color-sidebar-text)", fontStyle: "italic" }}>
-          No questions yet — click "Generate Questions" above.
+          No questions yet{isPM ? " — click \"Generate Questions\" above" : ""}.
         </p>
       )}
 
-      {/* Question cards */}
-      {questions.map((q, qi) => (
+      {questions.map((q, qi) => {
+        const rw = rewriteStates[q.id] ?? {};
+        return (
         <div key={q.id ?? qi} style={{
           borderRadius: "10px", border: "1px solid var(--color-card-border)",
           backgroundColor: "var(--color-card-bg)", overflow: "hidden",
         }}>
-          {/* Question header — text is editable */}
+          {/* Question header */}
           <div style={{
             display: "flex", alignItems: "center", gap: "10px",
             padding: "9px 14px", borderBottom: "1px solid var(--color-card-border)",
@@ -544,25 +566,106 @@ function QuestionnaireViewer({ questionnaire, adId, onGenerated }) {
               Q{qi + 1}
             </span>
             <input
-              style={{ ...inputBase, flex: 1, fontWeight: 600, backgroundColor: "transparent", border: "1px solid transparent", borderRadius: "6px", padding: "4px 8px",
-                transition: "border-color 0.15s",
-              }}
+              style={{ ...inputBase, flex: 1, fontWeight: 600, backgroundColor: "transparent", border: "1px solid transparent", borderRadius: "6px", padding: "4px 8px", transition: "border-color 0.15s" }}
               value={q.text}
               onChange={(e) => updateText(q.id, e.target.value)}
               onFocus={(e) => e.target.style.borderColor = "var(--color-accent)"}
               onBlur={(e) => e.target.style.borderColor = "transparent"}
               placeholder="Question text…"
             />
+            {/* AI rewrite button — PM only */}
+            {isPM && (
+              <button
+                onClick={() => toggleRewrite(q.id)}
+                title="Rewrite this question with AI"
+                style={{
+                  flexShrink: 0, background: rw.open ? "var(--color-accent-subtle)" : "none",
+                  border: `1px solid ${rw.open ? "var(--color-accent)" : "var(--color-card-border)"}`,
+                  borderRadius: "7px", padding: "5px 9px", cursor: "pointer",
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                  color: rw.open ? "var(--color-accent)" : "var(--color-sidebar-text)",
+                  fontSize: "0.72rem", fontWeight: 600,
+                }}
+              >
+                <Sparkles size={12} /> AI
+              </button>
+            )}
             <span style={{ fontSize: "0.7rem", color: "var(--color-sidebar-text)", flexShrink: 0, whiteSpace: "nowrap" }}>
               {QUESTION_TYPE_LABELS[q.type] ?? q.type}
               {q.required && <span style={{ color: "#ef4444", marginLeft: "4px" }}>*</span>}
             </span>
           </div>
 
-          {/* Answer area — options are editable for MCQ */}
+          {/* Per-question AI rewrite panel — PM only */}
+          {isPM && rw.open && (
+            <div style={{
+              padding: "10px 14px", borderBottom: "1px solid var(--color-card-border)",
+              backgroundColor: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.04)",
+              display: "flex", flexDirection: "column", gap: 8,
+            }}>
+              <p style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--color-accent)", textTransform: "uppercase", letterSpacing: "0.05em", margin: 0 }}>
+                Rewrite instruction
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  style={{ ...inputBase, flex: 1 }}
+                  value={rw.prompt ?? ""}
+                  onChange={(e) => setRewritePrompt(q.id, e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && !rw.loading && submitRewrite(q)}
+                  placeholder="e.g. focus on age eligibility, make it about prior medical history…"
+                  disabled={rw.loading}
+                  autoFocus
+                />
+                <button
+                  onClick={() => submitRewrite(q)}
+                  disabled={rw.loading || !rw.prompt?.trim()}
+                  className="btn--accent"
+                  style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 14px", opacity: (rw.loading || !rw.prompt?.trim()) ? 0.6 : 1 }}
+                >
+                  {rw.loading ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles size={13} />}
+                  {rw.loading ? "Rewriting…" : "Rewrite"}
+                </button>
+              </div>
+              {rw.error && <p style={{ fontSize: "0.75rem", color: "#ef4444", margin: 0 }}>{rw.error}</p>}
+            </div>
+          )}
+
+          {/* Answer area */}
           <div style={{ padding: "10px 14px" }}>
-            {(q.type === "text")     && <div style={answerPlaceholder}>Short text answer</div>}
-            {(q.type === "textarea") && <div style={{ ...answerPlaceholder, minHeight: "52px" }}>Long text answer</div>}
+            {(q.type === "multiple_choice") && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                {(q.options ?? []).map((opt, oi) => {
+                  const isCorrect = q.correct_option === oi;
+                  return (
+                    <div key={oi} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      {/* Correct-option tick */}
+                      <button
+                        type="button"
+                        title={isCorrect ? "Correct answer (click to unset)" : "Mark as correct answer"}
+                        onClick={() => setCorrectOption(q.id, oi)}
+                        style={{
+                          flexShrink: 0, width: 20, height: 20, borderRadius: "50%",
+                          border: `1.5px solid ${isCorrect ? "#22c55e" : "var(--color-card-border)"}`,
+                          backgroundColor: isCorrect ? "rgba(34,197,94,0.15)" : "transparent",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          cursor: "pointer", transition: "all 0.15s", padding: 0,
+                        }}
+                      >
+                        {isCorrect && <Check size={11} strokeWidth={3} style={{ color: "#22c55e" }} />}
+                      </button>
+                      <input
+                        style={{ ...inputBase, flex: 1, borderColor: isCorrect ? "rgba(34,197,94,0.3)" : undefined }}
+                        value={opt}
+                        onChange={(e) => updateOption(q.id, oi, e.target.value)}
+                        placeholder={`Option ${oi + 1}`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {(q.type === "text")     && <div style={{ padding: "7px 10px", borderRadius: "7px", fontSize: "0.82rem", border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)", color: "var(--color-sidebar-text)", fontStyle: "italic" }}>Short text answer</div>}
+            {(q.type === "textarea") && <div style={{ padding: "7px 10px", borderRadius: "7px", fontSize: "0.82rem", border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)", color: "var(--color-sidebar-text)", fontStyle: "italic", minHeight: "52px" }}>Long text answer</div>}
             {(q.type === "yes_no")   && (
               <div style={{ display: "flex", gap: "10px" }}>
                 {["Yes", "No"].map((opt) => (
@@ -577,24 +680,10 @@ function QuestionnaireViewer({ questionnaire, adId, onGenerated }) {
                 ))}
               </div>
             )}
-            {(q.type === "multiple_choice") && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                {(q.options ?? []).map((opt, oi) => (
-                  <div key={oi} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <div style={{ width: "13px", height: "13px", borderRadius: "50%", border: "1px solid var(--color-card-border)", flexShrink: 0 }} />
-                    <input
-                      style={{ ...inputBase, flex: 1 }}
-                      value={opt}
-                      onChange={(e) => updateOption(q.id, oi, e.target.value)}
-                      placeholder={`Option ${oi + 1}`}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -1534,6 +1623,7 @@ function PageTabBar({ active, onChange, showQuestionnaireDot }) {
 export default function ReviewerCampaignDetail() {
   const { id }    = useParams();
   const navigate  = useNavigate();
+  const { role }  = useAuth();
 
   const [ad,         setAd]         = useState(null);
   const [reviews,    setReviews]    = useState([]);
@@ -1587,7 +1677,7 @@ export default function ReviewerCampaignDetail() {
 
   const hasStrategy   = statusIndex(ad.status) >= statusIndex("strategy_created");
   const canAct        = ["under_review", "strategy_created", "ethics_review"].includes(ad.status);
-  const qualifies     = needsQuestionnaire(ad, protoDocs);
+  const qualifies     = needsQuestionnaire(ad);
   const questEmpty    = !(ad.questionnaire?.questions?.length > 0);
   const showQDot      = qualifies && questEmpty;
 
@@ -1787,7 +1877,7 @@ export default function ReviewerCampaignDetail() {
                   }
                 </p>
               </div>
-              <QuestionnaireViewer questionnaire={ad.questionnaire} adId={id} onGenerated={handleActionDone} />
+              <QuestionnaireViewer questionnaire={ad.questionnaire} adId={id} onGenerated={handleActionDone} role={role} />
             </>
           ) : (
             <div style={{ textAlign: "center", padding: "48px 0" }}>

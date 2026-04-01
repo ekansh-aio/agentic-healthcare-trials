@@ -324,6 +324,12 @@ export const adsAPI = {
       body: JSON.stringify({ questionnaire }),
     }),
 
+  rewriteQuestion: (adId, question, instruction) =>
+    request(`/advertisements/${adId}/questionnaire/rewrite-question`, {
+      method: "POST",
+      body: JSON.stringify({ question, instruction }),
+    }),
+
   delete: (adId) =>
     request(`/advertisements/${adId}`, { method: "DELETE" }),
 

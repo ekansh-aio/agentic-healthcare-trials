@@ -160,14 +160,8 @@ export const Sidebar = AppSidebar;
 function GenerationPill() {
   const { isGenerating, progress, done, error, adTitle, dismiss } = useGeneration();
   const location = useLocation();
-  const [expanded, setExpanded] = React.useState(false);
 
   const isOnCreatePage = location.pathname === "/study-coordinator/create";
-
-  // Auto-collapse whenever the user navigates away from the create page
-  React.useEffect(() => {
-    if (!isOnCreatePage) setExpanded(false);
-  }, [isOnCreatePage]);
 
   if (!isGenerating) return null;
 
@@ -182,8 +176,8 @@ function GenerationPill() {
   const pillBg     = done ? "rgba(74,222,128,0.12)" : error ? "rgba(239,68,68,0.12)" : "rgba(13,27,42,0.95)";
   const pillBorder = done ? "rgba(74,222,128,0.4)"  : error ? "rgba(239,68,68,0.4)"  : "rgba(255,255,255,0.12)";
 
-  // ── Expanded overlay (covers main content, to the right of the sidebar) ────
-  if (expanded && isOnCreatePage) {
+  // ── Expanded overlay — shown automatically when on the create page ──────────
+  if (isOnCreatePage) {
     const bs = 116, bst = 7, br = (bs - bst) / 2;
     const bc   = 2 * Math.PI * br;
     const boff = bc - (progress / 100) * bc;
@@ -199,20 +193,6 @@ function GenerationPill() {
         animation: "fadeIn 0.2s ease",
       }}>
         <style>{`@keyframes fadeIn{from{opacity:0}to{opacity:1}} @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
-
-        {/* Minimise button */}
-        <button
-          onClick={() => setExpanded(false)}
-          style={{
-            position: "absolute", top: 20, right: 24,
-            background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)",
-            borderRadius: 8, padding: "6px 14px", cursor: "pointer",
-            display: "flex", alignItems: "center", gap: 6,
-            fontSize: "0.75rem", color: "rgba(255,255,255,0.5)", fontFamily: "inherit",
-          }}
-        >
-          <X size={13} /> Minimise
-        </button>
 
         {/* Big progress ring */}
         <div style={{ position: "relative", width: bs, height: bs }}>
@@ -302,11 +282,9 @@ function GenerationPill() {
     );
   }
 
-  // ── Collapsed pill (bottom-right) ───────────────────────────────────────────
+  // ── Collapsed pill (bottom-right, shown on all other pages) ────────────────
   return (
     <div
-      onClick={() => isOnCreatePage && setExpanded(true)}
-      title={isOnCreatePage ? "Click to expand generation progress" : undefined}
       style={{
         position: "fixed", bottom: 24, right: 24, zIndex: 999,
         display: "flex", alignItems: "center", gap: 12,
@@ -317,7 +295,7 @@ function GenerationPill() {
         backdropFilter: "blur(12px)",
         boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
         maxWidth: 320,
-        cursor: isOnCreatePage ? "pointer" : "default",
+        cursor: "default",
         transition: "all 0.3s ease",
       }}
     >
@@ -363,10 +341,6 @@ function GenerationPill() {
           </span>
       }
 
-      {/* Expand hint only on create page */}
-      {isOnCreatePage && !done && !error && (
-        <span style={{ fontSize: "0.65rem", color: "rgba(255,255,255,0.28)", marginLeft: 2, flexShrink: 0 }}>↗</span>
-      )}
     </div>
   );
 }

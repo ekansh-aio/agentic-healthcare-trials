@@ -39,13 +39,8 @@ const QUESTIONNAIRE_CATEGORIES = new Set(["recruitment", "hiring", "survey", "cl
 const QUESTIONNAIRE_KEYWORDS = ["hiring", "recruit", "survey", "clinical", "trial", "research study", "job posting", "job opening", "application", "vacancy", "vacancies", "applicant", "enroll", "enrolment", "participant", "respondent"];
 
 /** Check protocol doc titles first (strongest signal), fall back to campaign title. */
-function needsQuestionnaire(ad, docs = []) {
-  if (!ad) return false;
-  if (QUESTIONNAIRE_CATEGORIES.has(ad.campaign_category)) return true;
-  const docText = docs.map((d) => `${d.title ?? ""} ${d.doc_type ?? ""}`).join(" ").toLowerCase();
-  if (docText && QUESTIONNAIRE_KEYWORDS.some((kw) => docText.includes(kw))) return true;
-  const title = (ad.title ?? "").toLowerCase();
-  return QUESTIONNAIRE_KEYWORDS.some((kw) => title.includes(kw));
+function needsQuestionnaire(ad) {
+  return !!ad;
 }
 
 // ─── Protocol document preview modal ─────────────────────────────────────────
@@ -146,7 +141,7 @@ const QUESTION_TYPES = [
 ];
 
 function newQuestion() {
-  return { id: crypto.randomUUID(), text: "", type: "multiple_choice", options: ["", ""], required: true };
+  return { id: crypto.randomUUID(), text: "", type: "multiple_choice", options: ["", ""], correct_option: null, required: true };
 }
 
 // ─── Auto-sizing textarea for question text ───────────────────────────────────
@@ -195,9 +190,10 @@ function QuestionnaireSection({ adId, questionnaire, readOnly, onSaved }) {
   const [saved_ok,  setSavedOk]   = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError,   setAiError]   = useState(null);
+  // per-question rewrite state: { [qId]: { open, prompt, loading, error } }
+  const [rewriteStates, setRewriteStates] = useState({});
   const qProgress = useGenerateProgress();
 
-  // keep local state in sync when parent reloads
   useEffect(() => {
     const qs = questionnaire?.questions ?? [];
     setQuestions(qs.length ? qs : [newQuestion()]);
@@ -225,6 +221,11 @@ function QuestionnaireSection({ adId, questionnaire, readOnly, onSaved }) {
 
   const removeQuestion = (id) =>
     setQuestions((prev) => prev.length > 1 ? prev.filter((q) => q.id !== id) : prev);
+
+  const setCorrectOption = (qId, idx) =>
+    setQuestions((prev) => prev.map((q) =>
+      q.id === qId ? { ...q, correct_option: q.correct_option === idx ? null : idx } : q
+    ));
 
   const save = async () => {
     const incomplete = questions.find((q) => !q.text.trim());
@@ -255,6 +256,29 @@ function QuestionnaireSection({ adId, questionnaire, readOnly, onSaved }) {
       setAiError(err.message || "AI questionnaire generation failed.");
     } finally {
       setAiLoading(false);
+    }
+  };
+
+  const toggleRewrite = (qId) =>
+    setRewriteStates((prev) => ({
+      ...prev,
+      [qId]: { open: !prev[qId]?.open, prompt: prev[qId]?.prompt ?? "", loading: false, error: null },
+    }));
+
+  const setRewritePrompt = (qId, val) =>
+    setRewriteStates((prev) => ({ ...prev, [qId]: { ...prev[qId], prompt: val } }));
+
+  const submitRewrite = async (q) => {
+    const state = rewriteStates[q.id] ?? {};
+    if (!state.prompt?.trim()) return;
+    setRewriteStates((prev) => ({ ...prev, [q.id]: { ...prev[q.id], loading: true, error: null } }));
+    try {
+      const res = await adsAPI.rewriteQuestion(adId, q, state.prompt.trim());
+      const updated = res.question;
+      setQuestions((prev) => prev.map((item) => item.id === q.id ? { ...updated, id: q.id } : item));
+      setRewriteStates((prev) => ({ ...prev, [q.id]: { open: false, prompt: "", loading: false, error: null } }));
+    } catch (err) {
+      setRewriteStates((prev) => ({ ...prev, [q.id]: { ...prev[q.id], loading: false, error: err.message || "Rewrite failed." } }));
     }
   };
 
@@ -305,7 +329,9 @@ function QuestionnaireSection({ adId, questionnaire, readOnly, onSaved }) {
 
       <div style={{ height: "1px", backgroundColor: "var(--color-card-border)" }} />
 
-      {questions.map((q, qi) => (
+      {questions.map((q, qi) => {
+        const rw = rewriteStates[q.id] ?? {};
+        return (
         <div key={q.id} style={{
           borderRadius: "10px", border: "1px solid var(--color-card-border)",
           backgroundColor: "var(--color-card-bg)", overflow: "hidden",
@@ -326,10 +352,25 @@ function QuestionnaireSection({ adId, questionnaire, readOnly, onSaved }) {
                   onChange={(val) => updateQ(q.id, { text: val })}
                   inputBase={inputBase}
                 />
+                {/* Rewrite with AI button */}
+                <button
+                  onClick={() => toggleRewrite(q.id)}
+                  title="Rewrite this question with AI"
+                  style={{
+                    flexShrink: 0, background: rw.open ? "var(--color-accent-subtle)" : "none",
+                    border: `1px solid ${rw.open ? "var(--color-accent)" : "var(--color-card-border)"}`,
+                    borderRadius: "7px", padding: "5px 9px", cursor: "pointer",
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                    color: rw.open ? "var(--color-accent)" : "var(--color-sidebar-text)",
+                    fontSize: "0.72rem", fontWeight: 600,
+                  }}
+                >
+                  <Sparkles size={12} /> AI
+                </button>
                 <button
                   onClick={() => removeQuestion(q.id)}
                   disabled={questions.length === 1}
-                  style={{ background: "none", border: "none", cursor: questions.length === 1 ? "not-allowed" : "pointer", padding: "4px", color: questions.length === 1 ? "var(--color-card-border)" : "#ef4444", flexShrink: 0, alignSelf: "flex-start", marginTop: "6px" }}
+                  style={{ background: "none", border: "none", cursor: questions.length === 1 ? "not-allowed" : "pointer", padding: "4px", color: questions.length === 1 ? "var(--color-card-border)" : "#ef4444", flexShrink: 0 }}
                   title="Delete question"
                 >
                   <Trash2 size={14} />
@@ -340,15 +381,67 @@ function QuestionnaireSection({ adId, questionnaire, readOnly, onSaved }) {
             )}
           </div>
 
+          {/* Per-question AI rewrite panel */}
+          {!readOnly && rw.open && (
+            <div style={{
+              padding: "10px 14px", borderBottom: "1px solid var(--color-card-border)",
+              backgroundColor: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.04)",
+              display: "flex", flexDirection: "column", gap: 8,
+            }}>
+              <p style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--color-accent)", textTransform: "uppercase", letterSpacing: "0.05em", margin: 0 }}>
+                Rewrite instruction
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  style={{ ...inputBase, flex: 1 }}
+                  value={rw.prompt ?? ""}
+                  onChange={(e) => setRewritePrompt(q.id, e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && !rw.loading && submitRewrite(q)}
+                  placeholder="e.g. focus on age eligibility, make it about prior medical history…"
+                  disabled={rw.loading}
+                  autoFocus
+                />
+                <button
+                  onClick={() => submitRewrite(q)}
+                  disabled={rw.loading || !rw.prompt?.trim()}
+                  className="btn--accent"
+                  style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 14px", opacity: (rw.loading || !rw.prompt?.trim()) ? 0.6 : 1 }}
+                >
+                  {rw.loading ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles size={13} />}
+                  {rw.loading ? "Rewriting…" : "Rewrite"}
+                </button>
+              </div>
+              {rw.error && <p style={{ fontSize: "0.75rem", color: "#ef4444", margin: 0 }}>{rw.error}</p>}
+            </div>
+          )}
+
           {/* Options */}
           <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: "6px" }}>
-            {(q.options ?? []).map((opt, oi) => (
+            {(q.options ?? []).map((opt, oi) => {
+              const isCorrect = q.correct_option === oi;
+              return (
               <div key={oi} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <div style={{ width: "13px", height: "13px", borderRadius: "50%", border: "1px solid var(--color-card-border)", flexShrink: 0 }} />
+                {/* Correct-option tick */}
+                <button
+                  type="button"
+                  title={isCorrect ? "Correct answer (click to unset)" : "Mark as correct answer"}
+                  onClick={() => !readOnly && setCorrectOption(q.id, oi)}
+                  style={{
+                    flexShrink: 0, width: 20, height: 20, borderRadius: "50%",
+                    border: `1.5px solid ${isCorrect ? "#22c55e" : "var(--color-card-border)"}`,
+                    backgroundColor: isCorrect ? "rgba(34,197,94,0.15)" : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    cursor: readOnly ? "default" : "pointer",
+                    transition: "all 0.15s",
+                    padding: 0,
+                  }}
+                >
+                  {isCorrect && <Check size={11} strokeWidth={3} style={{ color: "#22c55e" }} />}
+                </button>
                 {!readOnly ? (
                   <>
                     <input
-                      style={{ ...inputBase, flex: 1 }}
+                      style={{ ...inputBase, flex: 1, borderColor: isCorrect ? "rgba(34,197,94,0.3)" : undefined }}
                       value={opt}
                       onChange={(e) => updateOption(q.id, oi, e.target.value)}
                       placeholder={`Option ${oi + 1}`}
@@ -363,10 +456,13 @@ function QuestionnaireSection({ adId, questionnaire, readOnly, onSaved }) {
                     </button>
                   </>
                 ) : (
-                  <span style={{ fontSize: "0.82rem", color: "var(--color-input-text)" }}>{opt || <em style={{ color: "var(--color-sidebar-text)" }}>—</em>}</span>
+                  <span style={{ fontSize: "0.82rem", color: isCorrect ? "#22c55e" : "var(--color-input-text)", fontWeight: isCorrect ? 600 : 400 }}>
+                    {opt || <em style={{ color: "var(--color-sidebar-text)" }}>—</em>}
+                  </span>
                 )}
               </div>
-            ))}
+              );
+            })}
             {!readOnly && (
               <button
                 onClick={() => addOption(q.id)}
@@ -377,7 +473,8 @@ function QuestionnaireSection({ adId, questionnaire, readOnly, onSaved }) {
             )}
           </div>
         </div>
-      ))}
+        );
+      })}
 
       {!readOnly && (
         <>
@@ -2195,42 +2292,43 @@ function CampaignDetailPageInner() {
       {/* CSS for spinner */}
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
-      {/* Delete confirmation modal */}
+      {/* Delete confirmation — top banner */}
       {showDeleteConfirm && (
         <div style={{
-          position: "fixed", inset: 0, zIndex: 1000,
-          backgroundColor: "rgba(0,0,0,0.5)",
-          display: "flex", alignItems: "center", justifyContent: "center",
+          position: "fixed", top: 0, left: 240, right: 0, zIndex: 1000,
+          background: "var(--color-card-bg)",
+          borderBottom: "2px solid #ef4444",
+          boxShadow: "0 4px 24px rgba(0,0,0,0.35)",
+          padding: "18px 32px",
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24,
+          animation: "slideDown 0.2s ease",
         }}>
-          <div style={{
-            background: "var(--color-card-bg)", border: "1px solid var(--color-card-border)",
-            borderRadius: "14px", padding: "28px 32px", maxWidth: "400px", width: "90%",
-          }}>
-            <h3 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--color-input-text)", marginBottom: "8px" }}>
+          <style>{`@keyframes slideDown{from{transform:translateY(-100%);opacity:0}to{transform:translateY(0);opacity:1}}`}</style>
+          <div style={{ minWidth: 0 }}>
+            <p style={{ fontSize: "0.92rem", fontWeight: 700, color: "var(--color-input-text)", margin: "0 0 3px" }}>
               Delete Campaign?
-            </h3>
-            <p style={{ fontSize: "0.85rem", color: "var(--color-sidebar-text)", marginBottom: "24px", lineHeight: 1.6 }}>
-              This will permanently delete <strong style={{ color: "var(--color-input-text)" }}>{ad.title}</strong> and all
-              its documents, reviews, and analytics. This action cannot be undone.
             </p>
-            <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-              <button onClick={() => setShowDeleteConfirm(false)} disabled={deleteLoading} className="btn--ghost">
-                Cancel
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={deleteLoading}
-                style={{
-                  background: "#ef4444", color: "#fff", border: "none",
-                  borderRadius: "8px", padding: "8px 18px", cursor: "pointer",
-                  fontWeight: 600, fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "6px",
-                  opacity: deleteLoading ? 0.7 : 1,
-                }}
-              >
-                {deleteLoading ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Trash2 size={14} />}
-                Delete Campaign
-              </button>
-            </div>
+            <p style={{ fontSize: "0.8rem", color: "var(--color-sidebar-text)", margin: 0 }}>
+              Permanently deletes <strong style={{ color: "var(--color-input-text)" }}>{ad.title}</strong> — documents, reviews, and analytics. Cannot be undone.
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
+            <button onClick={() => setShowDeleteConfirm(false)} disabled={deleteLoading} className="btn--ghost" style={{ padding: "7px 16px" }}>
+              Cancel
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleteLoading}
+              style={{
+                background: "#ef4444", color: "#fff", border: "none",
+                borderRadius: "8px", padding: "7px 18px", cursor: "pointer",
+                fontWeight: 600, fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "6px",
+                opacity: deleteLoading ? 0.7 : 1,
+              }}
+            >
+              {deleteLoading ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Trash2 size={14} />}
+              Delete Campaign
+            </button>
           </div>
         </div>
       )}

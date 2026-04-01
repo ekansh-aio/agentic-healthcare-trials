@@ -217,6 +217,8 @@ Protocol Documents: {doc_titles}
 
 Generate 6–8 multiple-choice questions that screen or assess respondents for eligibility, suitability, or relevant experience for this campaign. Each question must have exactly 4 answer options. Questions should be specific to the campaign context — not generic.
 
+For each question you MUST include a "correct_option" field: the 0-based index (0–3) of the answer that indicates the respondent IS eligible or suitable. This is the answer that passes the screening criterion for that question.
+
 Return ONLY a JSON object in this exact format:
 {{
   "questions": [
@@ -225,6 +227,7 @@ Return ONLY a JSON object in this exact format:
       "text": "Question text here?",
       "type": "multiple_choice",
       "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correct_option": 0,
       "required": true
     }}
   ]
@@ -234,7 +237,7 @@ Return ONLY a JSON object in this exact format:
         response = await client.messages.create(
             model=get_model(),
             max_tokens=2048,
-            system="You are an expert at creating screening questionnaires for campaigns. Always respond with valid JSON only.",
+            system="You are an expert at creating screening questionnaires for campaigns. Always respond with valid JSON only. Always include correct_option (0-based index of the eligibility-passing answer) for every question.",
             messages=[{"role": "user", "content": user_message}],
         )
         text = response.content[0].text
@@ -244,14 +247,60 @@ Return ONLY a JSON object in this exact format:
         except json.JSONDecodeError:
             return {"questions": [], "parse_error": True}
 
+    async def rewrite_question(
+        self,
+        question: Dict[str, Any],
+        instruction: str,
+    ) -> Dict[str, Any]:
+        """
+        Rewrite a single MCQ question based on a user instruction.
+        Returns the updated question dict (same shape, same id).
+        """
+        if not is_configured():
+            return {**question, "text": f"[Rewritten] {question.get('text', '')}", "options": question.get("options", [])}
+
+        prompt = f"""Rewrite the following multiple-choice question based on the instruction provided.
+Keep the same JSON structure with exactly 4 answer options and a correct_option index (0-3) if present.
+
+Current question:
+{json.dumps(question, indent=2)}
+
+Instruction: {instruction}
+
+Return ONLY the updated question JSON object (no array, no extra text):
+{{
+  "id": "{question.get('id', 'q1')}",
+  "text": "...",
+  "type": "multiple_choice",
+  "options": ["...", "...", "...", "..."],
+  "correct_option": <0-3 index of the eligibility-passing answer>,
+  "required": {str(question.get('required', True)).lower()}
+}}"""
+
+        client = get_async_client()
+        response = await client.messages.create(
+            model=get_model(),
+            max_tokens=512,
+            system="You rewrite screening questionnaire questions. Always respond with valid JSON only.",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text
+        try:
+            clean = text.strip().removeprefix("```json").removesuffix("```").strip()
+            updated = json.loads(clean)
+            updated["id"] = question.get("id", updated.get("id", "q1"))
+            return updated
+        except json.JSONDecodeError:
+            return question
+
     def _mock_questionnaire(self, title: str) -> Dict[str, Any]:
         """Dev mock questionnaire when no API key is configured."""
         return {
             "questions": [
-                {"id": "q1", "text": f"What is your primary reason for interest in '{title}'?", "type": "multiple_choice", "options": ["Career growth", "Research interest", "Financial benefit", "Personal need"], "required": True},
-                {"id": "q2", "text": "What is your highest level of relevant experience?", "type": "multiple_choice", "options": ["No experience", "1–2 years", "3–5 years", "5+ years"], "required": True},
-                {"id": "q3", "text": "Are you currently available for the full duration of this campaign?", "type": "multiple_choice", "options": ["Yes, fully available", "Partially available", "Available after 1 month", "Not sure yet"], "required": True},
-                {"id": "q4", "text": "How did you hear about this campaign?", "type": "multiple_choice", "options": ["Online advertisement", "Referral", "Social media", "Direct outreach"], "required": False},
+                {"id": "q1", "text": f"What is your primary reason for interest in '{title}'?", "type": "multiple_choice", "options": ["Career growth", "Research interest", "Financial benefit", "Personal need"], "correct_option": 1, "required": True},
+                {"id": "q2", "text": "What is your highest level of relevant experience?", "type": "multiple_choice", "options": ["No experience", "1–2 years", "3–5 years", "5+ years"], "correct_option": 2, "required": True},
+                {"id": "q3", "text": "Are you currently available for the full duration of this campaign?", "type": "multiple_choice", "options": ["Yes, fully available", "Partially available", "Available after 1 month", "Not sure yet"], "correct_option": 0, "required": True},
+                {"id": "q4", "text": "How did you hear about this campaign?", "type": "multiple_choice", "options": ["Online advertisement", "Referral", "Social media", "Direct outreach"], "correct_option": 0, "required": False},
             ]
         }
 

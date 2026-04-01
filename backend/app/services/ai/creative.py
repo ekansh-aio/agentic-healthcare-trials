@@ -124,7 +124,7 @@ Budget: {ad.budget or 'unspecified'}
 {ad_details}
 
 Generate one creative brief per format listed in the ad specifications.
-If no formats are defined, generate three formats: 1080x1080 Static, 1080x1920 Story, and 16:9 Banner.
+If no formats are defined, generate three 1080x1920 Meta Ads (portrait/story format) — each a distinct creative iteration with different messaging, mood, and image concept, but all sized 1080x1920.
 """
         response = await client.messages.create(
             model=get_model(),
@@ -229,29 +229,29 @@ If no formats are defined, generate three formats: 1080x1080 Static, 1080x1920 S
             "creatives": [
                 {
                     "index": 0,
-                    "format": "1080x1080 Static",
+                    "format": "1080x1920 Meta Ad",
                     "headline": f"Discover {ad.title}",
                     "body": "Cutting-edge solutions built around your needs. Trusted by professionals worldwide.",
                     "cta": "Learn More",
-                    "image_prompt": "Modern minimalist product advertisement, clean white studio background, soft shadows, professional product photography",
+                    "image_prompt": "Portrait 9:16 Meta ad, modern minimalist healthcare setting, soft natural lighting, confident patient and doctor in consultation, clean clinical background, professional photography",
                     "image_url": None,
                 },
                 {
                     "index": 1,
-                    "format": "1080x1920 Story",
+                    "format": "1080x1920 Meta Ad",
                     "headline": "Make Your Move",
                     "body": "The future starts with one decision. Join thousands who already made the leap.",
                     "cta": "Get Started",
-                    "image_prompt": "Inspiring portrait of a confident professional, soft bokeh background, warm golden hour lighting, optimistic mood",
+                    "image_prompt": "Portrait 9:16 Meta ad, inspiring close-up of a confident smiling person, warm golden hour lighting, soft bokeh background, optimistic hopeful mood, photorealistic",
                     "image_url": None,
                 },
                 {
                     "index": 2,
-                    "format": "16:9 Banner",
+                    "format": "1080x1920 Meta Ad",
                     "headline": "Results That Speak",
                     "body": "Data-driven campaigns that convert. See the difference on day one.",
                     "cta": "See Results",
-                    "image_prompt": "Wide landscape shot of a modern office, clean lines, natural lighting through large windows, people collaborating in background",
+                    "image_prompt": "Portrait 9:16 Meta ad, modern medical research lab, scientists collaborating, bright clean environment, professional clinical atmosphere, photorealistic",
                     "image_url": None,
                 },
             ]

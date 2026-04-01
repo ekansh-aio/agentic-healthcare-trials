@@ -12,6 +12,7 @@ Protocol documents (campaign-specific) are stored separately from company docume
   - The curator loads both company docs and protocol docs, protocol docs win on priority.
 """
 
+import asyncio
 import os
 import mimetypes
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
@@ -29,7 +30,7 @@ from app.schemas.schemas import (
     AdvertisementCreate, AdvertisementOut, AdvertisementUpdate,
     ReviewCreate, ReviewOut, OptimizerDecision, BotConfigUpdate,
     AdvertisementDocumentOut, MinorEditRequest, RewriteStrategyRequest,
-    QuestionnaireUpdate,
+    QuestionnaireUpdate, RewriteQuestionRequest,
 )
 from app.core.security import require_roles, get_current_user
 from app.services.ai.curator import CuratorService
@@ -193,6 +194,19 @@ async def update_questionnaire(
     return ad
 
 
+@router.post("/{ad_id}/questionnaire/rewrite-question")
+async def rewrite_question(
+    ad_id: str,
+    body: RewriteQuestionRequest,
+    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PROJECT_MANAGER, UserRole.ETHICS_MANAGER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Rewrite a single MCQ question using Claude based on a user instruction."""
+    curator = CuratorService(db, user.company_id)
+    updated = await curator.rewrite_question(body.question, body.instruction)
+    return {"question": updated}
+
+
 # ─── Protocol Documents ───────────────────────────────────────────────────────
 
 @router.post("/{ad_id}/documents", response_model=AdvertisementDocumentOut)
@@ -313,11 +327,15 @@ async def generate_strategy(
 
     curator = CuratorService(db, user.company_id)
     try:
-        strategy = await curator.generate_strategy(ad, all_docs)
+        strategy, questionnaire = await asyncio.gather(
+            curator.generate_strategy(ad, all_docs),
+            curator.generate_questionnaire(ad, all_docs),
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     ad.strategy_json = strategy
+    ad.questionnaire = questionnaire
     ad.status = AdStatus.STRATEGY_CREATED
 
     return ad
@@ -795,6 +813,7 @@ async def delete_advertisement(
     if not ad:
         raise HTTPException(status_code=404, detail="Advertisement not found")
     await db.delete(ad)
+    await db.commit()
 
 
 @router.patch("/{ad_id}/bot-config", response_model=AdvertisementOut)
