@@ -277,6 +277,9 @@ export const adsAPI = {
   generateWebsite: (adId) =>
     request(`/advertisements/${adId}/generate-website`, { method: "POST" }),
 
+  hostPage: (adId) =>
+    request(`/advertisements/${adId}/host-page`, { method: "POST" }),
+
   // Returns URL strings (not API calls) — used for preview/download <a> hrefs.
   // Token passed as query param so the browser can open them directly.
   websitePreviewUrl: (adId) => {

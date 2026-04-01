@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   PageWithSidebar, SectionCard, MetricSummaryCard, CampaignStatusBadge,
 } from "../shared/Layout";
@@ -82,7 +83,7 @@ function SkeletonRow() {
   return (
     <div style={{
       display: "grid",
-      gridTemplateColumns: "1fr 180px 100px 110px",
+      gridTemplateColumns: "1fr 130px 75px 100px 100px",
       alignItems: "center",
       padding: "14px 16px",
       borderBottom: "1px solid var(--color-border, #e5e7eb)",
@@ -96,6 +97,7 @@ function SkeletonRow() {
         <div style={{ ...bar(48, 20), borderRadius: 10 }} />
       </div>
       <div style={bar(44, 13)} />
+      <div style={{ ...bar(72, 24), borderRadius: 6 }} />
       <div style={{ ...bar(80, 32), borderRadius: 8 }} />
     </div>
   );
@@ -338,6 +340,7 @@ function StrategyViewer({ strategy }) {
 // ─── Main dashboard ───────────────────────────────────────────────────────────
 
 export default function EthicsDashboard() {
+  const navigate = useNavigate();
   const [ads,      setAds]      = useState([]);
   const [docs,     setDocs]     = useState([]);
   const [loading,  setLoading]  = useState(true);
@@ -420,8 +423,8 @@ export default function EthicsDashboard() {
           >
             {loading ? (
               <div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 80px 90px", padding: "8px 16px", borderBottom: "1px solid var(--color-border, #e5e7eb)" }}>
-                  {["Campaign", "Platforms", "Budget", "Status"].map((h) => (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 130px 75px 100px 100px", padding: "8px 16px", borderBottom: "1px solid var(--color-border, #e5e7eb)" }}>
+                  {["Campaign", "Platforms", "Budget", "Status", "Action"].map((h) => (
                     <span key={h} style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "var(--color-sidebar-text)" }}>{h}</span>
                   ))}
                 </div>
@@ -437,8 +440,8 @@ export default function EthicsDashboard() {
             ) : (
               <div>
                 {/* Table header */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 80px 90px", padding: "8px 16px", borderBottom: "1px solid var(--color-border, #e5e7eb)" }}>
-                  {["Campaign", "Platforms", "Budget", "Status"].map((h) => (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 130px 75px 100px 100px", padding: "8px 16px", borderBottom: "1px solid var(--color-border, #e5e7eb)" }}>
+                  {["Campaign", "Platforms", "Budget", "Status", "Action"].map((h) => (
                     <span key={h} style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "var(--color-sidebar-text)" }}>{h}</span>
                   ))}
                 </div>
@@ -449,7 +452,7 @@ export default function EthicsDashboard() {
                     onClick={() => setSelected(ad)}
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "1fr 140px 80px 90px",
+                      gridTemplateColumns: "1fr 130px 75px 100px 100px",
                       alignItems: "center",
                       padding: "12px 16px",
                       borderBottom: "1px solid var(--color-border, #e5e7eb)",
@@ -472,7 +475,11 @@ export default function EthicsDashboard() {
                       <p style={{ fontWeight: 600, fontSize: 14, color: "var(--color-input-text)" }}>{ad.title}</p>
                       <p style={{ fontSize: 12, color: "var(--color-sidebar-text)", marginTop: 2 }}>
                         {new Date(ad.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                        {ad.ad_type && <span style={{ marginLeft: 6 }}>· {ad.ad_type}</span>}
+                        {ad.ad_type && (
+                          <span style={{ marginLeft: 6 }}>
+                            · {Array.isArray(ad.ad_type) ? ad.ad_type.join(", ") : ad.ad_type}
+                          </span>
+                        )}
                       </p>
                     </div>
                     {/* Platforms */}
@@ -485,6 +492,19 @@ export default function EthicsDashboard() {
                     </p>
                     {/* Status */}
                     <CampaignStatusBadge status={ad.status} />
+                    {/* Open detail */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); navigate(`/ethics/campaign/${ad.id}`); }}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 5,
+                        padding: "5px 12px", borderRadius: 7, fontSize: "0.75rem", fontWeight: 600,
+                        backgroundColor: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.1)",
+                        border: "1px solid rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.25)",
+                        color: "var(--color-accent)", cursor: "pointer",
+                      }}
+                    >
+                      <Eye size={12} /> Review
+                    </button>
                   </div>
                 ))}
               </div>

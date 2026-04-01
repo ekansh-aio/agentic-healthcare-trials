@@ -637,7 +637,6 @@ export default function CampaignCreator() {
         duration:          computeDuration(form.start_date, form.end_date),
         trial_start_date:  form.start_date || null,
         trial_end_date:    form.end_date || null,
-        platforms:         form.platforms,
         target_audience:   form.target_audience,
         trial_location:    form.trial_location.length > 0 ? form.trial_location : null,
         patients_required: form.patients_required ? parseInt(form.patients_required, 10) : null,
@@ -777,26 +776,46 @@ export default function CampaignCreator() {
 
   return (
     <PageWithSidebar>
+
       {/* ── Generation blocking overlay ─────────────────────────────────────── */}
       {isGenerating && (
         <div style={{
           position: "fixed", top: 0, bottom: 0, right: 0, left: 240,
           zIndex: 50,
-          background: "rgba(10,18,30,0.55)",
-          backdropFilter: "blur(6px)",
+          background: "rgba(10,18,30,0.72)",
+          backdropFilter: "blur(8px)",
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          gap: 12, pointerEvents: "all",
+          gap: 16, pointerEvents: "all",
         }}>
-          <Sparkles size={36} style={{ color: "#22d3ee", opacity: 0.7 }} />
-          <p style={{ fontSize: "1rem", fontWeight: 700, color: "#fff", margin: 0 }}>
-            Generation in progress
-          </p>
-          <p style={{ fontSize: "0.82rem", color: "rgba(255,255,255,0.5)", margin: 0, textAlign: "center", maxWidth: 340 }}>
-            Please wait until the current campaign is fully generated before starting a new one.
-          </p>
-          <p style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.3)", margin: 0 }}>
-            Click the progress indicator ↘ to track progress
-          </p>
+          <div style={{
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 20,
+            padding: "48px 56px",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 16,
+            maxWidth: 420, width: "90%",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.4)",
+          }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: "50%",
+              background: "rgba(34,211,238,0.12)",
+              border: "1.5px solid rgba(34,211,238,0.3)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <Sparkles size={26} style={{ color: "#22d3ee" }} />
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <p style={{ fontSize: "1.05rem", fontWeight: 700, color: "#fff", margin: "0 0 8px" }}>
+                Generation in progress
+              </p>
+              <p style={{ fontSize: "0.84rem", color: "rgba(255,255,255,0.5)", margin: 0, lineHeight: 1.6 }}>
+                Please wait until the current campaign is fully generated before starting a new one.
+              </p>
+            </div>
+            <p style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.28)", margin: 0 }}>
+              Click the progress indicator ↘ to track progress
+            </p>
+          </div>
         </div>
       )}
 

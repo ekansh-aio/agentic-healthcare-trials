@@ -21,15 +21,26 @@ def is_configured() -> bool:
     return settings.USE_BEDROCK or bool(settings.ANTHROPIC_API_KEY)
 
 
+def _bedrock_kwargs() -> dict:
+    """
+    Build keyword args for AnthropicBedrock clients.
+    Only pass explicit credentials when set — otherwise let boto3 resolve
+    them via its default chain (IAM role, ~/.aws/credentials, Secrets Manager
+    sidecar, ECS task role, instance metadata, etc.).
+    """
+    kwargs = {"aws_region": settings.AWS_REGION}
+    if settings.AWS_ACCESS_KEY_ID:
+        kwargs["aws_access_key"] = settings.AWS_ACCESS_KEY_ID
+    if settings.AWS_SECRET_ACCESS_KEY:
+        kwargs["aws_secret_key"] = settings.AWS_SECRET_ACCESS_KEY
+    return kwargs
+
+
 def get_client():
     """Synchronous client — use in blocking/trainer contexts."""
     if settings.USE_BEDROCK:
         from anthropic import AnthropicBedrock
-        return AnthropicBedrock(
-            aws_access_key=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_key=settings.AWS_SECRET_ACCESS_KEY,
-            aws_region=settings.AWS_REGION,
-        )
+        return AnthropicBedrock(**_bedrock_kwargs())
     from anthropic import Anthropic
     return Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
@@ -38,11 +49,7 @@ def get_async_client():
     """Async client — use in async service methods."""
     if settings.USE_BEDROCK:
         from anthropic import AsyncAnthropicBedrock
-        return AsyncAnthropicBedrock(
-            aws_access_key=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_key=settings.AWS_SECRET_ACCESS_KEY,
-            aws_region=settings.AWS_REGION,
-        )
+        return AsyncAnthropicBedrock(**_bedrock_kwargs())
     from anthropic import AsyncAnthropic
     return AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 

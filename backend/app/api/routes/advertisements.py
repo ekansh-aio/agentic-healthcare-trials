@@ -54,7 +54,7 @@ ALLOWED_PROTOCOL_TYPES = {
 @router.post("/", response_model=AdvertisementOut)
 async def create_advertisement(
     body: AdvertisementCreate,
-    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PUBLISHER])),
+    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR])),
     db: AsyncSession = Depends(get_db),
 ):
     ad = Advertisement(
@@ -111,7 +111,7 @@ async def get_advertisement(
 async def update_advertisement(
     ad_id: str,
     body: AdvertisementUpdate,
-    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PUBLISHER, UserRole.PROJECT_MANAGER])),
+    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR])),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -134,7 +134,7 @@ async def update_advertisement(
 @router.post("/{ad_id}/generate-questionnaire", response_model=AdvertisementOut)
 async def generate_questionnaire(
     ad_id: str,
-    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PUBLISHER, UserRole.PROJECT_MANAGER])),
+    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PROJECT_MANAGER, UserRole.ETHICS_MANAGER])),
     db: AsyncSession = Depends(get_db),
 ):
     """Use Claude to auto-generate an MCQ eligibility questionnaire from campaign context."""
@@ -176,7 +176,7 @@ async def generate_questionnaire(
 async def update_questionnaire(
     ad_id: str,
     body: QuestionnaireUpdate,
-    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PUBLISHER, UserRole.PROJECT_MANAGER])),
+    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PROJECT_MANAGER, UserRole.ETHICS_MANAGER])),
     db: AsyncSession = Depends(get_db),
 ):
     """Save or replace the questionnaire for a campaign."""
@@ -201,7 +201,7 @@ async def upload_protocol_document(
     doc_type: str = Form(...),
     title: str = Form(...),
     file: UploadFile = File(...),
-    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PUBLISHER])),
+    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR])),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -271,7 +271,7 @@ async def list_protocol_documents(
 @router.post("/{ad_id}/generate-strategy", response_model=AdvertisementOut)
 async def generate_strategy(
     ad_id: str,
-    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PUBLISHER])),
+    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR])),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -328,12 +328,15 @@ async def generate_strategy(
 @router.post("/{ad_id}/submit-for-review", response_model=AdvertisementOut)
 async def submit_for_review(
     ad_id: str,
-    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PUBLISHER])),
+    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR])),
     db: AsyncSession = Depends(get_db),
 ):
     """Move ad to reviewer queue. Reviewer AI pre-processes the strategy."""
     result = await db.execute(
-        select(Advertisement).where(Advertisement.id == ad_id)
+        select(Advertisement).where(
+            Advertisement.id == ad_id,
+            Advertisement.company_id == user.company_id,
+        )
     )
     ad = result.scalar_one_or_none()
     if not ad:
@@ -385,7 +388,12 @@ async def list_reviews(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(Review).where(Review.advertisement_id == ad_id)
+        select(Review)
+        .join(Advertisement, Review.advertisement_id == Advertisement.id)
+        .where(
+            Review.advertisement_id == ad_id,
+            Advertisement.company_id == user.company_id,
+        )
     )
     return result.scalars().all()
 
@@ -419,7 +427,7 @@ async def publish_advertisement(
 @router.post("/{ad_id}/generate-creatives", response_model=AdvertisementOut)
 async def generate_creatives(
     ad_id: str,
-    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PUBLISHER])),
+    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PROJECT_MANAGER, UserRole.ETHICS_MANAGER])),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -558,7 +566,7 @@ async def serve_website(
 @router.post("/{ad_id}/generate-website", response_model=AdvertisementOut)
 async def generate_website(
     ad_id: str,
-    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PUBLISHER])),
+    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PROJECT_MANAGER, UserRole.ETHICS_MANAGER])),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -605,13 +613,63 @@ async def generate_website(
     return ad
 
 
+# ─── Host Landing Page ────────────────────────────────────────────────────────
+
+@router.post("/{ad_id}/host-page", response_model=AdvertisementOut)
+async def host_page(
+    ad_id: str,
+    user: User = Depends(require_roles([UserRole.PUBLISHER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Copy the generated website HTML into static/pages/<ad_id>/index.html so it is
+    publicly accessible at /static/pages/<ad_id>/index.html without auth.
+
+    Requires the landing page to have been generated first (output_url must be set).
+    """
+    from app.core.config import settings
+    import shutil
+
+    result = await db.execute(
+        select(Advertisement).where(
+            Advertisement.id == ad_id,
+            Advertisement.company_id == user.company_id,
+        )
+    )
+    ad = result.scalar_one_or_none()
+    if not ad:
+        raise HTTPException(status_code=404, detail="Advertisement not found")
+    if not ad.output_url:
+        raise HTTPException(
+            status_code=400,
+            detail="Landing page has not been generated yet. Generate the website first.",
+        )
+
+    # Source: outputs/<company_id>/<ad_id>/website/index.html
+    src = os.path.join(settings.OUTPUT_DIR, user.company_id, ad_id, "website", "index.html")
+    if not os.path.exists(src):
+        raise HTTPException(status_code=404, detail="Generated website file not found on disk.")
+
+    # Destination: static/pages/<ad_id>/index.html
+    dest_dir = os.path.join(settings.STATIC_DIR, "pages", ad_id)
+    os.makedirs(dest_dir, exist_ok=True)
+    dest = os.path.join(dest_dir, "index.html")
+    shutil.copy2(src, dest)
+
+    hosted_url = f"/static/pages/{ad_id}/index.html"
+    ad.hosted_url = hosted_url
+    await db.commit()
+    await db.refresh(ad)
+    return ad
+
+
 # ─── Reviewer: Minor Edit ─────────────────────────────────────────────────────
 
 @router.post("/{ad_id}/minor-edit", response_model=AdvertisementOut)
 async def minor_edit_strategy(
     ad_id: str,
     body: MinorEditRequest,
-    user: User = Depends(require_roles([UserRole.PROJECT_MANAGER])),
+    user: User = Depends(require_roles([UserRole.PROJECT_MANAGER, UserRole.ETHICS_MANAGER])),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -660,7 +718,7 @@ async def minor_edit_strategy(
 async def rewrite_strategy(
     ad_id: str,
     body: RewriteStrategyRequest,
-    user: User = Depends(require_roles([UserRole.PROJECT_MANAGER, UserRole.STUDY_COORDINATOR])),
+    user: User = Depends(require_roles([UserRole.PROJECT_MANAGER, UserRole.ETHICS_MANAGER])),
     db: AsyncSession = Depends(get_db),
 ):
     """

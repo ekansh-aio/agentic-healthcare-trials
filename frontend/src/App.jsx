@@ -65,12 +65,14 @@ function AppRoutes() {
       <Route path="/ethics" element={<ProtectedRoute allowedRoles={["ethics_manager"]}><EthicsDashboard /></ProtectedRoute>} />
       <Route path="/ethics/review" element={<ProtectedRoute allowedRoles={["ethics_manager"]}><EthicsDashboard /></ProtectedRoute>} />
       <Route path="/ethics/documents" element={<ProtectedRoute allowedRoles={["ethics_manager"]}><EthicsDashboard /></ProtectedRoute>} />
+      <Route path="/ethics/campaign/:id" element={<ProtectedRoute allowedRoles={["ethics_manager"]}><CampaignDetailPage /></ProtectedRoute>} />
 
       {/* Publisher routes */}
       <Route path="/publisher" element={<ProtectedRoute allowedRoles={["publisher"]}><PublisherDashboard /></ProtectedRoute>} />
       <Route path="/publisher/deploy" element={<ProtectedRoute allowedRoles={["publisher"]}><PublisherDashboard /></ProtectedRoute>} />
       <Route path="/publisher/distribute" element={<ProtectedRoute allowedRoles={["publisher"]}><PublisherDashboard /></ProtectedRoute>} />
       <Route path="/publisher/analytics" element={<ProtectedRoute allowedRoles={["publisher"]}><PublisherDashboard /></ProtectedRoute>} />
+      <Route path="/publisher/campaign/:id" element={<ProtectedRoute allowedRoles={["publisher"]}><CampaignDetailPage /></ProtectedRoute>} />
 
       {/* Unauthorized */}
       <Route path="/unauthorized" element={

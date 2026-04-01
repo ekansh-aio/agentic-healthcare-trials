@@ -160,12 +160,12 @@ If no formats are defined, generate three formats: 1080x1080 Static, 1080x1920 S
         width, height = self._get_dimensions(format_name)
 
         try:
-            bedrock = boto3.client(
-                "bedrock-runtime",
-                region_name=settings.AWS_REGION,
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-            )
+            boto3_kwargs = {"region_name": settings.AWS_REGION}
+            if settings.AWS_ACCESS_KEY_ID:
+                boto3_kwargs["aws_access_key_id"] = settings.AWS_ACCESS_KEY_ID
+            if settings.AWS_SECRET_ACCESS_KEY:
+                boto3_kwargs["aws_secret_access_key"] = settings.AWS_SECRET_ACCESS_KEY
+            bedrock = boto3.client("bedrock-runtime", **boto3_kwargs)
 
             safe_prompt = (prompt or "Professional advertisement, modern minimal design, clean composition")[:1024]
 

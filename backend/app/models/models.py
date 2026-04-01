@@ -220,6 +220,7 @@ class Advertisement(Base):
     website_reqs      = Column(JSON, nullable=True)
     ad_details        = Column(JSON, nullable=True)
     output_url        = Column(String(1024), nullable=True)
+    hosted_url        = Column(String(1024), nullable=True)
     output_files      = Column(JSON, nullable=True)
     bot_config        = Column(JSON, nullable=True)
     questionnaire     = Column(JSON, nullable=True)         # {questions: [{id, text, type, options, required}]}

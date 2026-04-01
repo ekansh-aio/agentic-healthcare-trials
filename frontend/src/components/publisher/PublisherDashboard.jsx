@@ -171,9 +171,10 @@ export default function PublisherDashboard() {
   const [loading,   setLoading]   = useState(true);
 
   // Overview state
-  const [publishing,  setPublishing]  = useState(null);
-  const [expandedId,  setExpandedId]  = useState(null);
-  const [previewAd,   setPreviewAd]   = useState(null);
+  const [publishing,   setPublishing]  = useState(null);
+  const [publishError, setPublishError] = useState(null);
+  const [expandedId,   setExpandedId]  = useState(null);
+  const [previewAd,    setPreviewAd]   = useState(null);
 
   // Deploy state
   const [deployExpanded, setDeployExpanded] = useState(null); // { adId, platformId }
@@ -196,11 +197,14 @@ export default function PublisherDashboard() {
 
   // ── Overview handlers ────────────────────────────────────────────────────
   const handlePublish = async (adId) => {
-    setPublishing(adId);
+    setPublishing(adId); setPublishError(null);
     try {
       const updated = await adsAPI.publish(adId);
       setAds((p) => p.map((a) => (a.id === adId ? updated : a)));
-    } catch (err) { alert(err.message); }
+    } catch (err) {
+      setPublishError(err.message || "Publish failed. Campaign must be approved first.");
+      setTimeout(() => setPublishError(null), 6000);
+    }
     finally { setPublishing(null); }
   };
 
@@ -294,10 +298,12 @@ export default function PublisherDashboard() {
           approved={approved}
           published={published}
           publishing={publishing}
+          publishError={publishError}
           expandedId={expandedId}
           onToggle={(id) => setExpandedId((p) => (p === id ? null : id))}
           onPublish={handlePublish}
           onPreviewAd={setPreviewAd}
+          onViewDetail={(id) => navigate(`/publisher/campaign/${id}`)}
         />
       )}
 
@@ -338,9 +344,19 @@ export default function PublisherDashboard() {
 }
 
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
-function OverviewTab({ approved, published, publishing, expandedId, onToggle, onPublish, onPreviewAd }) {
+function OverviewTab({ approved, published, publishing, publishError, expandedId, onToggle, onPublish, onPreviewAd, onViewDetail }) {
   return (
     <div className="space-y-4">
+      {publishError && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "12px 16px", borderRadius: 10,
+          backgroundColor: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)",
+        }}>
+          <AlertCircle size={15} style={{ color: "#ef4444", flexShrink: 0 }} />
+          <p style={{ fontSize: "0.85rem", color: "#ef4444" }}>{publishError}</p>
+        </div>
+      )}
       <SectionCard
         title="Ready to Publish"
         subtitle={approved.length > 0
@@ -360,7 +376,7 @@ function OverviewTab({ approved, published, publishing, expandedId, onToggle, on
               key={ad.id} ad={ad}
               expanded={expandedId === ad.id} onToggle={() => onToggle(ad.id)}
               publishing={publishing}
-              onPublish={onPublish} onPreviewAd={onPreviewAd}
+              onPublish={onPublish} onPreviewAd={onPreviewAd} onViewDetail={onViewDetail}
             />
           ))
         )}
@@ -378,7 +394,7 @@ function OverviewTab({ approved, published, publishing, expandedId, onToggle, on
               key={ad.id} ad={ad}
               expanded={expandedId === ad.id} onToggle={() => onToggle(ad.id)}
               publishing={publishing}
-              onPublish={onPublish} onPreviewAd={onPreviewAd}
+              onPublish={onPublish} onPreviewAd={onPreviewAd} onViewDetail={onViewDetail}
             />
           ))
         )}
@@ -387,7 +403,7 @@ function OverviewTab({ approved, published, publishing, expandedId, onToggle, on
   );
 }
 
-function CampaignRow({ ad, expanded, onToggle, publishing, onPublish, onPreviewAd }) {
+function CampaignRow({ ad, expanded, onToggle, publishing, onPublish, onPreviewAd, onViewDetail }) {
   const isLive = ad.status === "published";
   return (
     <div>
@@ -405,6 +421,17 @@ function CampaignRow({ ad, expanded, onToggle, publishing, onPublish, onPreviewA
         </div>
         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           {expanded ? <ChevronUp size={14} style={{ color: "var(--color-sidebar-text)" }} /> : <ChevronDown size={14} style={{ color: "var(--color-sidebar-text)" }} />}
+          <button
+            onClick={() => onViewDetail(ad.id)}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 4,
+              padding: "4px 10px", borderRadius: 6, fontSize: "0.72rem", fontWeight: 600,
+              border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-card-bg)",
+              color: "var(--color-sidebar-text)", cursor: "pointer",
+            }}
+          >
+            <Eye size={11} /> Details
+          </button>
           {!isLive ? (
             <button onClick={() => onPublish(ad.id)} disabled={publishing === ad.id} className="btn--publish">
               {publishing === ad.id

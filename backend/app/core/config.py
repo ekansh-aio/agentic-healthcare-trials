@@ -23,12 +23,12 @@ _ENV_FILE = next((p for p in _ENV_CANDIDATES if os.path.exists(p)), ".env")
 class Settings(BaseSettings):
     # App
     APP_NAME: str = "Marketing Analytics Platform"
-    DEBUG: bool = True
+    DEBUG: bool = False
     SECRET_KEY: str = "CHANGE-ME-in-production-use-openssl-rand-hex-32"
 
     # JWT
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 480   # 8 hours
+    JWT_EXPIRE_MINUTES: int = 60   # 1 hour
 
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./marketing_platform.db"
@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads"
     OUTPUT_DIR: str = "./outputs"
     STATIC_DIR: str = "./static"
-    STATIC_URL: str = "http://127.0.0.1:8000/static"
+    STATIC_URL: str = "/static"
 
     class Config:
         env_file = _ENV_FILE

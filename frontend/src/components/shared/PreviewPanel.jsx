@@ -7,13 +7,14 @@
  * Styles: use classes from index.css only — no raw Tailwind color utilities.
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { SectionCard, CampaignStatusBadge } from "./Layout";
 import { adsAPI } from "../../services/api";
 import {
   Image, Globe, Download, Eye, Loader2,
   Sparkles, ImageOff, MonitorSmartphone,
 } from "lucide-react";
+
 
 // ─── Creative card grid ───────────────────────────────────────────────────────
 
@@ -164,6 +165,24 @@ function CreativesGrid({ creatives }) {
 // ─── Website preview pane ─────────────────────────────────────────────────────
 
 function WebsitePane({ ad }) {
+  const [htmlContent, setHtmlContent] = useState(null);
+  const [loading,     setLoading]     = useState(false);
+  const [fetchError,  setFetchError]  = useState(null);
+
+  useEffect(() => {
+    if (!ad.output_url) return;
+    setLoading(true);
+    setFetchError(null);
+    setHtmlContent(null);
+    fetch(adsAPI.websitePreviewUrl(ad.id))
+      .then((r) => {
+        if (!r.ok) throw new Error(`Preview unavailable (${r.status})`);
+        return r.text();
+      })
+      .then((html) => { setHtmlContent(html); setLoading(false); })
+      .catch((err) => { setFetchError(err.message); setLoading(false); });
+  }, [ad.id, ad.output_url]);
+
   if (!ad.output_url) {
     return (
       <div style={{ textAlign: "center", padding: "48px 20px", color: "var(--color-sidebar-text)" }}>
@@ -188,16 +207,49 @@ function WebsitePane({ ad }) {
           <Download size={13} /> Download HTML
         </a>
       </div>
-      <iframe
-        src={adsAPI.websitePreviewUrl(ad.id)}
-        title="Website Preview"
-        style={{
-          width: "100%", height: 560,
-          border: "1px solid var(--color-card-border)",
-          borderRadius: 10,
-        }}
-        sandbox="allow-scripts allow-same-origin"
-      />
+
+      {loading && (
+        <div style={{
+          height: 560, display: "flex", alignItems: "center", justifyContent: "center",
+          border: "1px solid var(--color-card-border)", borderRadius: 10,
+          color: "var(--color-sidebar-text)", gap: 10,
+        }}>
+          <Loader2 size={18} style={{ animation: "spin 0.75s linear infinite" }} />
+          <span style={{ fontSize: 13 }}>Loading preview…</span>
+        </div>
+      )}
+
+      {fetchError && !loading && (
+        <div style={{
+          height: 200, display: "flex", flexDirection: "column", alignItems: "center",
+          justifyContent: "center", gap: 8,
+          border: "1px solid rgba(239,68,68,0.25)", borderRadius: 10,
+          backgroundColor: "rgba(239,68,68,0.05)",
+        }}>
+          <Globe size={28} style={{ color: "#ef4444", opacity: 0.6 }} />
+          <p style={{ fontSize: 13, fontWeight: 600, color: "#ef4444", margin: 0 }}>Preview could not be loaded</p>
+          <p style={{ fontSize: 12, color: "var(--color-sidebar-text)", margin: 0 }}>{fetchError}</p>
+          <a
+            href={adsAPI.websiteDownloadUrl(ad.id)}
+            style={{ fontSize: 12, color: "var(--color-accent)", textDecoration: "none", marginTop: 4 }}
+          >
+            Download HTML instead
+          </a>
+        </div>
+      )}
+
+      {htmlContent && !loading && (
+        <iframe
+          srcDoc={htmlContent}
+          title="Website Preview"
+          style={{
+            width: "100%", height: 560,
+            border: "1px solid var(--color-card-border)",
+            borderRadius: 10,
+          }}
+          sandbox="allow-scripts"
+        />
+      )}
     </div>
   );
 }

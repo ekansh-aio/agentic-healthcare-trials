@@ -188,7 +188,7 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              <button type="submit" disabled={loading || !company} className="btn--primary-full mt-2">
+              <button type="submit" disabled={loading || !company || !email || !password} className="btn--primary-full mt-2">
                 <LogIn size={18} />
                 {loading ? "Signing in…" : "Sign In"}
               </button>

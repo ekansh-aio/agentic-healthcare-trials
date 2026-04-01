@@ -223,6 +223,7 @@ class AdvertisementOut(BaseModel):
     website_reqs: Optional[Dict[str, Any]] = None
     ad_details: Optional[Dict[str, Any]] = None
     output_url: Optional[str] = None
+    hosted_url: Optional[str] = None
     output_files: Optional[List[Dict[str, Any]]] = None
     bot_config: Optional[Dict[str, Any]] = None
     questionnaire: Optional[Dict[str, Any]] = None

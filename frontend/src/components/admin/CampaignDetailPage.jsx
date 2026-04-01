@@ -30,7 +30,7 @@ import {
   Loader2, Target, DollarSign, Users, Layers, Zap, BarChart2,
   MessageCircle, Send, ThumbsUp, ThumbsDown, RefreshCw, Sparkles,
   Download, Eye, Trash2, ClipboardList, Plus, X as XIcon, GripVertical,
-  LayoutDashboard, ClipboardCheck, History, MapPin,
+  LayoutDashboard, ClipboardCheck, History, MapPin, Copy,
 } from "lucide-react";
 
 // ─── Campaign categories that require a questionnaire ─────────────────────────
@@ -269,30 +269,32 @@ function QuestionnaireSection({ adId, questionnaire, readOnly, onSaved }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
 
-      {/* AI Generate banner */}
-      <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-        <button
-          onClick={generateWithAI}
-          disabled={aiLoading}
-          className="btn--accent"
-          style={{ display: "inline-flex", alignItems: "center", gap: "7px", opacity: aiLoading ? 0.7 : 1 }}
-        >
+      {/* AI Generate banner — only for editors */}
+      {!readOnly && (
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          <button
+            onClick={generateWithAI}
+            disabled={aiLoading}
+            className="btn--accent"
+            style={{ display: "inline-flex", alignItems: "center", gap: "7px", opacity: aiLoading ? 0.7 : 1 }}
+          >
+            {aiLoading
+              ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+              : <Sparkles size={14} />}
+            {aiLoading ? "Generating…" : hasQuestions ? "Regenerate Questions" : "Generate Questions"}
+          </button>
           {aiLoading
-            ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
-            : <Sparkles size={14} />}
-          {aiLoading ? "Generating…" : hasQuestions ? "Regenerate Questions" : "Generate Questions"}
-        </button>
-        {aiLoading
-          ? <InlineProgress progress={qProgress.progress} />
-          : (
-            <p style={{ fontSize: "0.75rem", color: "var(--color-sidebar-text)" }}>
-              {hasQuestions
-                ? "Current questions will be replaced based on campaign context and protocol documents."
-                : "MCQ eligibility questions will be generated from your campaign brief and protocol documents."}
-            </p>
-          )
-        }
-      </div>
+            ? <InlineProgress progress={qProgress.progress} />
+            : (
+              <p style={{ fontSize: "0.75rem", color: "var(--color-sidebar-text)" }}>
+                {hasQuestions
+                  ? "Current questions will be replaced based on campaign context and protocol documents."
+                  : "MCQ eligibility questions will be generated from your campaign brief and protocol documents."}
+              </p>
+            )
+          }
+        </div>
+      )}
 
       {aiError && (
         <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 14px", borderRadius: "8px", backgroundColor: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)" }}>
@@ -1636,13 +1638,14 @@ const PAGE_TABS = [
   { key: "publish",       label: "Publish",       icon: Zap             },
 ];
 
-function PageTabBar({ active, onChange, showQuestionnaireDot }) {
+function PageTabBar({ active, onChange, showQuestionnaireDot, role }) {
   return (
     <div style={{
       display: "flex", borderBottom: "1px solid var(--color-card-border)",
       marginBottom: 28, gap: 0, overflowX: "auto",
     }}>
       {PAGE_TABS.map(({ key, label, icon: Icon }) => {
+        const displayLabel = key === "publish" && role === "study_coordinator" ? "Preview" : label;
         const isActive = active === key;
         const hasDot   = key === "questionnaire" && showQuestionnaireDot;
         return (
@@ -1659,7 +1662,7 @@ function PageTabBar({ active, onChange, showQuestionnaireDot }) {
             }}
           >
             <Icon size={14} />
-            {label}
+            {displayLabel}
             {hasDot && (
               <span style={{
                 width: 7, height: 7, borderRadius: "50%",
@@ -1953,6 +1956,8 @@ function CampaignDetailPageInner() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [websiteLoading,  setWebsiteLoading]  = useState(false);
   const [websiteError,    setWebsiteError]    = useState(null);
+  const [hostLoading,     setHostLoading]     = useState(false);
+  const [hostError,       setHostError]       = useState(null);
   const [regenLoading,    setRegenLoading]    = useState(false);
   const [regenError,      setRegenError]      = useState(null);
   const [regenInstr,      setRegenInstr]      = useState("");
@@ -1964,6 +1969,10 @@ function CampaignDetailPageInner() {
   const genProgress = useGenerateProgress();
 
   const role = JSON.parse(localStorage.getItem("user") || "{}").role;
+  const isStudyCoordinator = role === "study_coordinator";
+  const canRegenerate = ["project_manager", "ethics_manager"].includes(role);
+  const canGenerate   = isStudyCoordinator || canRegenerate;
+  const isPublisher   = role === "publisher";
 
   const load = useCallback(async () => {
     try {
@@ -1993,11 +2002,48 @@ function CampaignDetailPageInner() {
   // ── Action handlers ──────────────────────────────────────────────────────
   const handleGenerateStrategy = async () => {
     setGenLoading(true); setGenError(null);
-    genProgress.start("Generating strategy…", 25000);
     try {
-      const updated = await adsAPI.generateStrategy(id);
-      setAd(updated);
+      // Step 1 — strategy
+      genProgress.start("Generating strategy…", 25000);
+      const afterStrategy = await adsAPI.generateStrategy(id);
+      setAd(afterStrategy);
       genProgress.complete();
+
+      const adTypes = afterStrategy.ad_type || [];
+      const isWebsite  = adTypes.includes("website");
+      const hasNonWeb  = adTypes.some(t => t !== "website");
+
+      // Step 2 — website (if campaign type includes website)
+      if (isWebsite) {
+        setWebsiteLoading(true); setWebsiteError(null);
+        genProgress.start("Building landing page…", 35000);
+        try {
+          const afterWebsite = await adsAPI.generateWebsite(id);
+          setAd(afterWebsite);
+          genProgress.complete();
+        } catch (err) {
+          genProgress.fail();
+          setWebsiteError(err.message || "Website generation failed.");
+        } finally {
+          setWebsiteLoading(false);
+        }
+      }
+
+      // Step 3 — creatives (if campaign includes non-website ad types)
+      if (hasNonWeb) {
+        setCreativeLoading(true); setCreativeError(null);
+        genProgress.start("Generating ad creatives…", 40000);
+        try {
+          const afterCreatives = await adsAPI.generateCreatives(id);
+          setAd(afterCreatives);
+          genProgress.complete();
+        } catch (err) {
+          genProgress.fail();
+          setCreativeError(err.message || "Creative generation failed.");
+        } finally {
+          setCreativeLoading(false);
+        }
+      }
     } catch (err) {
       genProgress.fail();
       setGenError(err.message || "Strategy generation failed. Check that training has been run and API keys are configured.");
@@ -2067,6 +2113,18 @@ function CampaignDetailPageInner() {
       setWebsiteError(err.message || "Website generation failed.");
     } finally {
       setWebsiteLoading(false);
+    }
+  };
+
+  const handleHostPage = async () => {
+    setHostLoading(true); setHostError(null);
+    try {
+      const updated = await adsAPI.hostPage(id);
+      setAd(updated);
+    } catch (err) {
+      setHostError(err.message || "Hosting failed.");
+    } finally {
+      setHostLoading(false);
     }
   };
 
@@ -2204,7 +2262,7 @@ function CampaignDetailPageInner() {
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 20, position: "relative" }}>
           <div style={{ minWidth: 0 }}>
             <p style={{ fontSize: "0.7rem", fontWeight: 600, letterSpacing: "0.1em", color: "rgba(255,255,255,0.4)", textTransform: "uppercase", marginBottom: 6 }}>
-              Study Coordinator · Campaign
+              {role?.replace(/_/g, " ")} · Campaign
             </p>
             <h1 style={{ fontSize: "1.5rem", fontWeight: 700, color: "#fff", lineHeight: 1.3, margin: 0 }}>
               {ad.title}
@@ -2282,7 +2340,7 @@ function CampaignDetailPageInner() {
       </div>
 
       {/* ── Page tab navigation ── */}
-      <PageTabBar active={pageTab} onChange={setPageTab} showQuestionnaireDot={showQDot} />
+      <PageTabBar active={pageTab} onChange={setPageTab} showQuestionnaireDot={showQDot} role={role} />
 
       {/* ══ OVERVIEW tab ══════════════════════════════════════════════════════ */}
       {pageTab === "overview" && (
@@ -2469,6 +2527,41 @@ function CampaignDetailPageInner() {
             </div>
           )}
 
+          {/* Generated Assets preview — shown to all roles whenever content exists */}
+          {(ad.output_url || ad.output_files?.length > 0) && (
+            <SectionCard title="Generated Assets" subtitle="Preview content produced for this campaign">
+              {ad.output_url && (
+                <div style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "14px 18px", borderRadius: "10px", marginBottom: ad.output_files?.length > 0 ? "16px" : 0,
+                  border: "1px solid rgba(16,185,129,0.3)", backgroundColor: "rgba(16,185,129,0.06)",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <Globe size={16} style={{ color: "var(--color-accent)", flexShrink: 0 }} />
+                    <div>
+                      <p style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-input-text)" }}>Landing Page</p>
+                      <p style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", marginTop: "2px" }}>Self-contained HTML · brand-styled · responsive</p>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <a href={adsAPI.websitePreviewUrl(id)} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "7px 14px", borderRadius: "8px", fontSize: "0.8rem", fontWeight: 600, backgroundColor: "var(--color-accent)", color: "#fff", textDecoration: "none", border: "none" }}>
+                      <Eye size={13} /> Preview
+                    </a>
+                    <a href={adsAPI.websiteDownloadUrl(id)} download="landing-page.html" style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "7px 14px", borderRadius: "8px", fontSize: "0.8rem", fontWeight: 600, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-card-bg)", color: "var(--color-input-text)", textDecoration: "none" }}>
+                      <Download size={13} /> Download
+                    </a>
+                  </div>
+                </div>
+              )}
+              {ad.output_files?.length > 0 && (
+                <div>
+                  <p style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--color-sidebar-text)", marginBottom: "12px" }}>Ad Creatives ({ad.output_files.length})</p>
+                  <CreativesViewer creatives={ad.output_files} />
+                </div>
+              )}
+            </SectionCard>
+          )}
+
         </div>
       )}
 
@@ -2476,8 +2569,8 @@ function CampaignDetailPageInner() {
       {pageTab === "strategy" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
 
-          {/* Generate (draft) */}
-          {ad.status === "draft" && (
+          {/* Generate (draft) — Study Coordinator only */}
+          {ad.status === "draft" && isStudyCoordinator && (
             <SectionCard
               title="Generate Marketing Strategy"
               subtitle="Analyses your company documents and campaign brief to create a tailored strategy"
@@ -2514,8 +2607,8 @@ function CampaignDetailPageInner() {
             </SectionCard>
           )}
 
-          {/* Regenerate (admin) */}
-          {hasStrategy && role === "study_coordinator" && (
+          {/* Regenerate — Project Manager and Ethics Manager only */}
+          {hasStrategy && canRegenerate && (
             <SectionCard
               title="Regenerate Strategy"
               subtitle="Replace the current strategy using your instructions"
@@ -2594,8 +2687,8 @@ function CampaignDetailPageInner() {
             </SectionCard>
           )}
 
-          {/* Submit for review */}
-          {ad.status === "strategy_created" && (
+          {/* Submit for review — Study Coordinator only */}
+          {ad.status === "strategy_created" && isStudyCoordinator && (
             <SectionCard
               title="Submit for Review"
               subtitle="The Reviewer AI will analyse the strategy and prepare website requirements and ad specifications"
@@ -2642,7 +2735,7 @@ function CampaignDetailPageInner() {
               <QuestionnaireSection
                 adId={id}
                 questionnaire={ad.questionnaire}
-                readOnly={false}
+                readOnly={isPublisher}
                 onSaved={load}
               />
             </>
@@ -2743,9 +2836,9 @@ function CampaignDetailPageInner() {
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
 
           {/* Generate Ad Creatives */}
-          {(ad.status === "approved" || ad.status === "published") && role === "publisher" && (
+          {(canRegenerate ? ad.status !== "draft" : !!ad.output_files?.length) && (
             <SectionCard
-              title="Generate Ad Creatives"
+              title="Ad Creatives"
               subtitle="Campaign copy and visuals produced from your strategy"
             >
               {creativeError && (
@@ -2754,28 +2847,30 @@ function CampaignDetailPageInner() {
                   <p style={{ fontSize: "0.82rem", color: "#ef4444", lineHeight: 1.5 }}>{creativeError}</p>
                 </div>
               )}
-              <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: ad.output_files?.length ? "24px" : 0 }}>
-                <ActionButton onClick={handleGenerateCreatives} loading={creativeLoading} icon={<Sparkles size={14} />}>
-                  {creativeLoading ? "Generating…" : ad.output_files?.length ? "Regenerate Creatives" : "Generate Ad Creatives"}
-                </ActionButton>
-                {creativeLoading
-                  ? <InlineProgress progress={genProgress.progress} />
-                  : !ad.output_files?.length && (
-                      <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>
-                        Generates copy + images for all ad formats · uses AWS Bedrock Titan
-                      </p>
-                    )
-                }
-              </div>
+              {canRegenerate && (
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: ad.output_files?.length ? "24px" : 0 }}>
+                  <ActionButton onClick={handleGenerateCreatives} loading={creativeLoading} icon={<Sparkles size={14} />}>
+                    {creativeLoading ? "Generating…" : ad.output_files?.length ? "Regenerate Creatives" : "Generate Ad Creatives"}
+                  </ActionButton>
+                  {creativeLoading
+                    ? <InlineProgress progress={genProgress.progress} />
+                    : !ad.output_files?.length && (
+                        <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>
+                          Generates copy + images for all ad formats · uses AWS Bedrock Titan
+                        </p>
+                      )
+                  }
+                </div>
+              )}
               {ad.output_files?.length > 0 && <CreativesViewer creatives={ad.output_files} />}
             </SectionCard>
           )}
 
           {/* Generate Website */}
-          {(ad.status === "approved" || ad.status === "published") && ad.ad_type?.includes("website") && role === "publisher" && (
+          {ad.ad_type?.includes("website") && (canRegenerate ? ad.status !== "draft" : !!ad.output_url) && (
             <SectionCard
-              title="Generate Landing Page"
-              subtitle="Builds a complete, brand-styled HTML page from your strategy and website requirements"
+              title="Landing Page"
+              subtitle="Brand-styled HTML page generated from your strategy and website requirements"
             >
               {websiteError && (
                 <div style={{ display: "flex", alignItems: "flex-start", gap: "10px", padding: "12px 14px", borderRadius: "8px", backgroundColor: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", marginBottom: "16px" }}>
@@ -2783,47 +2878,76 @@ function CampaignDetailPageInner() {
                   <p style={{ fontSize: "0.82rem", color: "#ef4444", lineHeight: 1.5 }}>{websiteError}</p>
                 </div>
               )}
-              <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: ad.output_url ? "20px" : 0 }}>
-                <ActionButton onClick={handleGenerateWebsite} loading={websiteLoading} icon={<Globe size={14} />}>
-                  {websiteLoading ? "Generating…" : ad.output_url ? "Regenerate Website" : "Generate Website"}
-                </ActionButton>
-                {websiteLoading
-                  ? <InlineProgress progress={genProgress.progress} />
-                  : !ad.output_url && (
-                      <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>
-                        Generates a self-contained HTML page · uses brand kit + strategy
-                      </p>
-                    )
-                }
-              </div>
+              {canRegenerate && (
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: ad.output_url ? "20px" : 0 }}>
+                  <ActionButton onClick={handleGenerateWebsite} loading={websiteLoading} icon={<Globe size={14} />}>
+                    {websiteLoading ? "Generating…" : ad.output_url ? "Regenerate Website" : "Generate Website"}
+                  </ActionButton>
+                  {websiteLoading
+                    ? <InlineProgress progress={genProgress.progress} />
+                    : !ad.output_url && (
+                        <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>
+                          Generates a self-contained HTML page · uses brand kit + strategy
+                        </p>
+                      )
+                  }
+                </div>
+              )}
               {ad.output_url && (
-                <div style={{
-                  display: "flex", alignItems: "center", justifyContent: "space-between",
-                  padding: "14px 18px", borderRadius: "10px",
-                  border: "1px solid rgba(16,185,129,0.3)", backgroundColor: "rgba(16,185,129,0.06)",
-                }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <Globe size={16} style={{ color: "var(--color-accent)", flexShrink: 0 }} />
-                    <div>
-                      <p style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-input-text)" }}>Landing page ready</p>
-                      <p style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", marginTop: "2px" }}>Self-contained HTML · brand-styled · responsive</p>
+                <>
+                  <div style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "14px 18px", borderRadius: "10px",
+                    border: "1px solid rgba(16,185,129,0.3)", backgroundColor: "rgba(16,185,129,0.06)",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <Globe size={16} style={{ color: "var(--color-accent)", flexShrink: 0 }} />
+                      <div>
+                        <p style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-input-text)" }}>Landing page ready</p>
+                        <p style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", marginTop: "2px" }}>Self-contained HTML · brand-styled · responsive</p>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <a href={adsAPI.websitePreviewUrl(id)} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "7px 14px", borderRadius: "8px", fontSize: "0.8rem", fontWeight: 600, backgroundColor: "var(--color-accent)", color: "#fff", textDecoration: "none", border: "none" }}>
+                        <Eye size={13} /> Preview
+                      </a>
+                      <a href={adsAPI.websiteDownloadUrl(id)} download="landing-page.html" style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "7px 14px", borderRadius: "8px", fontSize: "0.8rem", fontWeight: 600, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-card-bg)", color: "var(--color-input-text)", textDecoration: "none" }}>
+                        <Download size={13} /> Download
+                      </a>
+                      {isPublisher && (
+                        <ActionButton onClick={handleHostPage} loading={hostLoading} icon={<Globe size={13} />}>
+                          {hostLoading ? "Hosting…" : ad.hosted_url ? "Re-host" : "Host"}
+                        </ActionButton>
+                      )}
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    <a href={adsAPI.websitePreviewUrl(id)} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "7px 14px", borderRadius: "8px", fontSize: "0.8rem", fontWeight: 600, backgroundColor: "var(--color-accent)", color: "#fff", textDecoration: "none", border: "none" }}>
-                      <Eye size={13} /> Preview
-                    </a>
-                    <a href={adsAPI.websiteDownloadUrl(id)} download="landing-page.html" style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "7px 14px", borderRadius: "8px", fontSize: "0.8rem", fontWeight: 600, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-card-bg)", color: "var(--color-input-text)", textDecoration: "none" }}>
-                      <Download size={13} /> Download
-                    </a>
-                  </div>
-                </div>
+                  {isPublisher && hostError && (
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: "10px", padding: "10px 14px", borderRadius: "8px", backgroundColor: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", marginTop: "12px" }}>
+                      <AlertCircle size={14} style={{ color: "#ef4444", flexShrink: 0, marginTop: "2px" }} />
+                      <p style={{ fontSize: "0.82rem", color: "#ef4444", lineHeight: 1.5 }}>{hostError}</p>
+                    </div>
+                  )}
+                  {isPublisher && ad.hosted_url && (
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "12px", padding: "10px 14px", borderRadius: "8px", backgroundColor: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.2)" }}>
+                      <Globe size={14} style={{ color: "#22c55e", flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", marginBottom: "2px" }}>Hosted at</p>
+                        <a href={ad.hosted_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: "0.82rem", color: "var(--color-accent)", wordBreak: "break-all", textDecoration: "none", fontWeight: 500 }}>
+                          {window.location.origin}{ad.hosted_url}
+                        </a>
+                      </div>
+                      <button onClick={() => navigator.clipboard.writeText(window.location.origin + ad.hosted_url)} title="Copy URL" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-sidebar-text)", padding: "4px", flexShrink: 0 }}>
+                        <Copy size={13} />
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </SectionCard>
           )}
 
-          {/* Publish */}
-          {ad.status === "approved" && (
+          {/* Publish — Publisher only */}
+          {ad.status === "approved" && isPublisher && (
             <SectionCard title="Publish Campaign" subtitle="Campaign has been approved — ready to go live">
               {pubError && (
                 <div style={{ display: "flex", alignItems: "flex-start", gap: "10px", padding: "12px 14px", borderRadius: "8px", backgroundColor: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", marginBottom: "16px" }}>
@@ -2850,11 +2974,19 @@ function CampaignDetailPageInner() {
           )}
 
           {/* Empty state */}
-          {!isPublished && ad.status !== "approved" && !(role === "publisher" && (ad.status === "published")) && (
+          {isPublisher && ad.status !== "approved" && ad.status !== "published" && (
             <div style={{ textAlign: "center", padding: "48px 0" }}>
               <Zap size={32} style={{ color: "var(--color-card-border)", margin: "0 auto 12px" }} />
               <p style={{ color: "var(--color-sidebar-text)", fontSize: "0.9rem" }}>
                 Campaign must be <strong style={{ color: "var(--color-input-text)" }}>approved</strong> before publishing.
+              </p>
+            </div>
+          )}
+          {isStudyCoordinator && ad.status === "draft" && (
+            <div style={{ textAlign: "center", padding: "48px 0" }}>
+              <Zap size={32} style={{ color: "var(--color-card-border)", margin: "0 auto 12px" }} />
+              <p style={{ color: "var(--color-sidebar-text)", fontSize: "0.9rem" }}>
+                Generate a <strong style={{ color: "var(--color-input-text)" }}>strategy</strong> first to unlock preview.
               </p>
             </div>
           )}

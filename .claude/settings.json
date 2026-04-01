@@ -4,7 +4,10 @@
       "Bash(curl -s http://localhost:8000/docs)",
       "Bash(curl -v -X POST http://localhost:8000/api/onboarding/ -H \"Content-Type: application/json\" -d '{\"\"company_name\"\":\"\"Test\"\",\"\"industry\"\":\"\"Tech\"\",\"\"admin_email\"\":\"\"test@test.com\"\",\"\"admin_password\"\":\"\"password123\"\",\"\"admin_name\"\":\"\"Test Admin\"\"}')",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" -X POST http://localhost:8000/api/onboarding/ -H \"Content-Type: application/json\" -d '{\"\"company_name\"\":\"\"TestCo\"\",\"\"industry\"\":\"\"Tech\"\",\"\"admin_email\"\":\"\"t@t.com\"\",\"\"admin_password\"\":\"\"password123\"\",\"\"admin_name\"\":\"\"Test\"\"}')",
-      "Bash(docker-compose up:*)"
+      "Bash(docker-compose up:*)",
+      "Bash(docker-compose logs:*)",
+      "Bash(curl -s -X POST http://localhost:8001/api/auth/login -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"silverhandjohnny40@gmail.com\"\",\"\"password\"\":\"\"Admin@123\"\",\"\"company\"\":\"\"testing\"\",\"\"role\"\":\"\"study_coordinator\"\"}')",
+      "Bash(docker exec health_care_agentic-backend-1 python -c \":*)"
     ]
   }
 }

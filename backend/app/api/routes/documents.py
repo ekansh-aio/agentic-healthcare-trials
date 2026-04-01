@@ -10,6 +10,7 @@ Used by Study Coordinator (My Company) and Ethics Manager (Document Updation).
 import os
 import mimetypes
 import logging
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -181,19 +182,32 @@ async def serve_document_file(
         raise HTTPException(status_code=404, detail="No file attached to this document")
 
     # file_path stored as "/uploads/docs/<company_id>/filename.ext"
-    # Strip the leading "/uploads/" and join against the absolute uploads root.
-    relative = doc.file_path.lstrip("/").removeprefix("uploads/")
-    disk_path = os.path.join(_UPLOADS_ROOT, relative)
+    # Use exact prefix removal (not lstrip) then resolve and boundary-check
+    # to prevent path traversal attacks (e.g. ../../etc/passwd).
+    stored = doc.file_path
+    if stored.startswith("/uploads/"):
+        relative = stored[len("/uploads/"):]
+    elif stored.startswith("uploads/"):
+        relative = stored[len("uploads/"):]
+    else:
+        raise HTTPException(status_code=400, detail="Invalid file path")
 
-    if not os.path.exists(disk_path):
+    uploads_base = Path(_UPLOADS_ROOT).resolve()
+    disk_path = (uploads_base / relative).resolve()
+
+    if not str(disk_path).startswith(str(uploads_base) + os.sep):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not disk_path.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
 
-    media_type, _ = mimetypes.guess_type(disk_path)
+    media_type, _ = mimetypes.guess_type(str(disk_path))
     media_type = media_type or "application/octet-stream"
 
     return FileResponse(
-        path=disk_path,
+        path=str(disk_path),
         media_type=media_type,
+        headers={"Content-Disposition": f'inline; filename="{disk_path.name}"'},
     )
 
 

@@ -4,10 +4,14 @@ import os
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.models.models import Company, CompanyDocument, SkillConfig
 from app.schemas.schemas import TrainingStatus
 from app.core.bedrock import get_client, get_model, is_configured
+from app.core.config import settings
+
+_is_postgres = settings.DATABASE_URL.startswith("postgresql")
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 BASE_DIR          = os.path.dirname(os.path.abspath(__file__))
@@ -59,10 +63,10 @@ class TrainingService:
         if not company:
             raise ValueError(f"Company {company_id} not found")
 
-        # Acquire a PostgreSQL advisory lock scoped to this company so that
-        # concurrent training requests queue up rather than racing.
-        # hashtext() converts the company_id string to a stable int key.
-        await self.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:cid))"), {"cid": company_id})
+        # Acquire a PostgreSQL advisory lock to prevent concurrent training races.
+        # Skipped for SQLite (no advisory lock support needed for single-process dev).
+        if _is_postgres:
+            await self.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:cid))"), {"cid": company_id})
 
         # Load all company documents
         docs_result = await self.db.execute(
@@ -102,29 +106,52 @@ class TrainingService:
                 filled = template
 
             # Upsert: insert if not exists, update skill_md + bump version if exists.
-            # ON CONFLICT requires a unique constraint on (company_id, skill_type).
-            # If that constraint is missing, add it:
-            #   ALTER TABLE skill_configs ADD CONSTRAINT uq_skill_company_type
-            #     UNIQUE (company_id, skill_type);
-            stmt = (
-                pg_insert(SkillConfig)
-                .values(
-                    company_id=company_id,
-                    skill_type=skill_name,
-                    skill_md=filled,
-                    version=1,
+            if _is_postgres:
+                stmt = (
+                    pg_insert(SkillConfig)
+                    .values(
+                        company_id=company_id,
+                        skill_type=skill_name,
+                        skill_md=filled,
+                        version=1,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["company_id", "skill_type"],
+                        set_={
+                            "skill_md": filled,
+                            "version":  SkillConfig.version + 1,
+                        },
+                    )
+                    .returning(SkillConfig.version)
                 )
-                .on_conflict_do_update(
-                    index_elements=["company_id", "skill_type"],
-                    set_={
-                        "skill_md": filled,
-                        "version":  SkillConfig.version + 1,
-                    },
+                row = await self.db.execute(stmt)
+                version = row.scalar_one()
+            else:
+                # SQLite upsert (supported since SQLite 3.24)
+                stmt = (
+                    sqlite_insert(SkillConfig)
+                    .values(
+                        company_id=company_id,
+                        skill_type=skill_name,
+                        skill_md=filled,
+                        version=1,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["company_id", "skill_type"],
+                        set_={
+                            "skill_md": filled,
+                            "version":  SkillConfig.version + 1,
+                        },
+                    )
                 )
-                .returning(SkillConfig.version)
-            )
-            row = await self.db.execute(stmt)
-            version = row.scalar_one()
+                await self.db.execute(stmt)
+                row = await self.db.execute(
+                    select(SkillConfig.version).where(
+                        SkillConfig.company_id == company_id,
+                        SkillConfig.skill_type == skill_name,
+                    )
+                )
+                version = row.scalar_one()
 
             skill_versions[skill_name] = version
             print(f"  [OK] {skill_name} skill saved to DB (v{version})")
