@@ -67,6 +67,7 @@ async def init_db():
             _sql = __import__("sqlalchemy").text
 
             _sqlite_cols = [
+                "ALTER TABLE chat_sessions ADD COLUMN updated_at DATETIME;",
                 "ALTER TABLE advertisement_documents ADD COLUMN content TEXT;",
                 "ALTER TABLE advertisements ADD COLUMN campaign_category VARCHAR(64);",
                 "ALTER TABLE advertisements ADD COLUMN questionnaire JSON;",
@@ -113,6 +114,15 @@ async def init_db():
             "ALTER TABLE advertisements ADD COLUMN IF NOT EXISTS trial_end_date DATE;")
         await _add_column_if_missing(conn,
             "ALTER TABLE advertisements ADD COLUMN IF NOT EXISTS hosted_url VARCHAR(1024);")
+
+        # chat_sessions unique index (safe to re-run — uses IF NOT EXISTS)
+        try:
+            await conn.execute(_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_session "
+                "ON chat_sessions (campaign_id, session_id);"
+            ))
+        except Exception:
+            pass
 
         # Deduplicate skill_configs before adding unique constraint.
         try:

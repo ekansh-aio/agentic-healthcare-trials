@@ -18,7 +18,7 @@ import {
   Send, Globe, Image, BarChart3, Sparkles,
   CheckCircle, Rocket, ChevronDown, ChevronUp, Zap, X, ImageOff,
   Share2, UploadCloud, ExternalLink, Download, Eye, AlertCircle,
-  CheckCircle2, Loader2, Mic, PhoneCall, PhoneOff, Volume2, Radio, MessageSquare,
+  CheckCircle2, Loader2, Mic, PhoneCall, PhoneOff, Volume2, Radio, MessageSquare, Copy,
 } from "lucide-react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -173,6 +173,8 @@ export default function PublisherDashboard() {
   // Overview state
   const [publishing,   setPublishing]  = useState(null);
   const [publishError, setPublishError] = useState(null);
+  const [hostingId,    setHostingId]   = useState(null);
+  const [hostError,    setHostError]   = useState({});
   const [expandedId,   setExpandedId]  = useState(null);
   const [previewAd,    setPreviewAd]   = useState(null);
 
@@ -206,6 +208,18 @@ export default function PublisherDashboard() {
       setTimeout(() => setPublishError(null), 6000);
     }
     finally { setPublishing(null); }
+  };
+
+  const handleHostPage = async (adId) => {
+    setHostingId(adId); setHostError((p) => ({ ...p, [adId]: null }));
+    try {
+      const updated = await adsAPI.hostPage(adId);
+      setAds((p) => p.map((a) => (a.id === adId ? updated : a)));
+    } catch (err) {
+      setHostError((p) => ({ ...p, [adId]: err.message || "Hosting failed." }));
+    } finally {
+      setHostingId(null);
+    }
   };
 
   // ── Deploy handlers ──────────────────────────────────────────────────────
@@ -480,14 +494,39 @@ function CampaignDetailPanel({ ad, onPreviewAd }) {
         <div className="mb-4">
           <p className="pub-campaign-detail__section-label">Generated Website</p>
           {ad.output_url ? (
-            <div className="flex gap-2">
-              <a href={adsAPI.websitePreviewUrl(ad.id)} target="_blank" rel="noreferrer" className="btn--inline-action--success">
-                <Eye size={11} /> Preview
-              </a>
-              <a href={adsAPI.websiteDownloadUrl(ad.id)} className="btn--inline-action--ghost">
-                <Download size={11} /> Download HTML
-              </a>
-            </div>
+            <>
+              <div className="flex gap-2" style={{ flexWrap: "wrap" }}>
+                <a href={adsAPI.websitePreviewUrl(ad.id)} target="_blank" rel="noreferrer" className="btn--inline-action--success">
+                  <Eye size={11} /> Preview
+                </a>
+                <a href={adsAPI.websiteDownloadUrl(ad.id)} className="btn--inline-action--ghost">
+                  <Download size={11} /> Download HTML
+                </a>
+                <button
+                  onClick={() => handleHostPage(ad.id)}
+                  disabled={hostingId === ad.id}
+                  className="btn--inline-action--ghost"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: hostingId === ad.id ? "wait" : "pointer" }}
+                >
+                  <Globe size={11} />
+                  {hostingId === ad.id ? "Hosting…" : ad.hosted_url ? "Re-host" : "Host"}
+                </button>
+              </div>
+              {hostError[ad.id] && (
+                <p style={{ fontSize: "0.75rem", color: "#ef4444", marginTop: 6 }}>{hostError[ad.id]}</p>
+              )}
+              {ad.hosted_url && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, padding: "8px 12px", borderRadius: 8, backgroundColor: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.2)" }}>
+                  <Globe size={12} style={{ color: "#22c55e", flexShrink: 0 }} />
+                  <a href={ad.hosted_url} target="_blank" rel="noreferrer" style={{ fontSize: "0.75rem", color: "var(--color-accent)", textDecoration: "none", flex: 1, wordBreak: "break-all" }}>
+                    {window.location.origin}{ad.hosted_url}
+                  </a>
+                  <button onClick={() => navigator.clipboard.writeText(window.location.origin + ad.hosted_url)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-sidebar-text)", padding: 2, flexShrink: 0 }}>
+                    <Copy size={11} />
+                  </button>
+                </div>
+              )}
+            </>
           ) : (
             <p className="text-xs" style={{ color: "var(--color-sidebar-text)" }}>Website not yet generated</p>
           )}

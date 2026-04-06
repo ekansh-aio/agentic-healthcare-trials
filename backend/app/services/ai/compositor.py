@@ -1,9 +1,12 @@
 """
 Ad Compositor — overlays structured text/design onto a photo background.
 
-Split-layout pharma ad style:
-  TOP : solid color panel with headline (serif bold) + emphasis underlines + divider + subtext
-  BOTTOM : AI-generated photo (GPT-image-1 output, no text)
+Typography hierarchy (matches pharma/clinical trial ad style):
+  ① Small italic serif  → intro phrase before ALL CAPS
+  ② Huge bold serif     → ALL CAPS emphasis run (auto-sized to fill panel width)
+  ③ Small italic serif  → continuation phrase after ALL CAPS
+  ── divider ──
+  ④ Bold sans-serif     → subtext
 
 Usage:
     from app.services.ai.compositor import composite_ad
@@ -13,38 +16,36 @@ Usage:
 import io
 import os
 import re
-from typing import Tuple, List
+from typing import List, Tuple
 from PIL import Image, ImageDraw, ImageFont
 
-# ── Font candidates (tried in order, first match wins) ────────────────────────
+# ── Font candidates ───────────────────────────────────────────────────────────
 
 _SERIF_BOLD = [
-    # Linux / Docker (installed via apt fonts-dejavu-core, fonts-liberation)
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf",
     "/usr/share/fonts/truetype/freefont/FreeSerifBold.ttf",
-    # macOS
     "/Library/Fonts/Georgia Bold.ttf",
-    "/System/Library/Fonts/Times.ttc",
-    # Windows
     "C:/Windows/Fonts/georgiab.ttf",
     "C:/Windows/Fonts/timesbd.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
 ]
 
-_SANS_REGULAR = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-    "/Library/Fonts/Arial.ttf",
-    "/System/Library/Fonts/Helvetica.ttc",
-    "C:/Windows/Fonts/arial.ttf",
-    "C:/Windows/Fonts/calibri.ttf",
+_SERIF_BOLD_ITALIC = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-BoldItalic.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSerif-BoldItalic.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSerifBoldItalic.ttf",
+    "/Library/Fonts/Georgia Bold Italic.ttf",
+    "C:/Windows/Fonts/georgiaz.ttf",
+    "C:/Windows/Fonts/timesbi.ttf",
+    "C:/Windows/Fonts/georgiai.ttf",
 ]
 
 _SANS_BOLD = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+    "/Library/Fonts/Arial Bold.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
     "C:/Windows/Fonts/calibrib.ttf",
 ]
@@ -57,7 +58,10 @@ def _load_font(candidates: list, size: int) -> ImageFont.FreeTypeFont:
                 return ImageFont.truetype(path, size)
             except Exception:
                 continue
-    return ImageFont.load_default(size=size)
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
 
 
 def _hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
@@ -67,152 +71,143 @@ def _hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
-def _is_emphasis(word: str) -> bool:
-    """True for ALL-CAPS tokens with ≥2 letters — rendered larger with underline."""
-    clean = re.sub(r"[^a-zA-Z]", "", word)
-    return len(clean) >= 2 and clean.isupper()
+def _tw(draw: ImageDraw.ImageDraw, text: str, font) -> float:
+    return draw.textlength(text, font=font)
 
 
-def _text_height(draw: ImageDraw.ImageDraw, text: str, font) -> int:
+def _th(draw: ImageDraw.ImageDraw, text: str, font) -> int:
     bb = draw.textbbox((0, 0), text, font=font)
     return bb[3] - bb[1]
 
 
-def _text_width(draw: ImageDraw.ImageDraw, text: str, font) -> float:
-    return draw.textlength(text, font=font)
-
-
-def _build_lines(
-    draw: ImageDraw.ImageDraw,
-    words: List[str],
-    font_std,
-    font_emp,
-    max_w: float,
-) -> List[List[Tuple[str, object]]]:
-    """Greedy word-wrap returning list of lines, each line is [(word, font), ...]."""
-    lines, current_line, current_w = [], [], 0.0
+def _parse_runs(text: str) -> List[Tuple[str, bool]]:
+    """
+    Split headline into [(segment_text, is_emphasis), ...].
+    Consecutive ALL-CAPS words (≥2 letters) are grouped as one emphasis run.
+    """
+    words = text.split()
+    runs, current, current_emp = [], [], None
     for word in words:
-        font = font_emp if _is_emphasis(word) else font_std
-        w = _text_width(draw, word, font)
-        space = _text_width(draw, " ", font)
-        gap = space if current_line else 0
-        if current_line and current_w + gap + w > max_w:
-            lines.append(current_line)
-            current_line = [(word, font)]
-            current_w = w
+        clean = re.sub(r"[^a-zA-Z]", "", word)
+        is_emp = len(clean) >= 2 and clean.isupper()
+        if current_emp is None:
+            current_emp, current = is_emp, [word]
+        elif is_emp == current_emp:
+            current.append(word)
         else:
-            current_line.append((word, font))
-            current_w += gap + w
-    if current_line:
-        lines.append(current_line)
-    return lines
+            runs.append((" ".join(current), current_emp))
+            current, current_emp = [word], is_emp
+    if current:
+        runs.append((" ".join(current), current_emp))
+    return runs
 
 
-def _draw_headline(
-    draw: ImageDraw.ImageDraw,
-    text: str,
-    canvas_w: int,
-    top_h: int,
-    padding: int,
-    text_color: Tuple[int, int, int],
-    subtext: str,
-    subtext_color: Tuple[int, int, int],
-    divider_color: Tuple[int, int, int],
-) -> None:
-    """
-    Renders the full top section:
-    - Headline with emphasis words larger + underlined
-    - Thin divider
-    - Subtext
+def _fit_font(draw: ImageDraw.ImageDraw, text: str, candidates: list,
+              max_w: float, max_size: int = 148, min_size: int = 64) -> ImageFont.FreeTypeFont:
+    """Return the largest font from candidates where text fits within max_w."""
+    for size in range(max_size, min_size - 1, -4):
+        font = _load_font(candidates, size)
+        if _tw(draw, text, font) <= max_w:
+            return font
+    return _load_font(candidates, min_size)
 
-    The whole text block is vertically centered in top_h.
-    """
-    max_w = canvas_w - padding * 2
 
-    # Font sizes for 1080px canvas — large enough to dominate the top panel
-    font_std = _load_font(_SERIF_BOLD,   92)
-    font_emp = _load_font(_SERIF_BOLD,  118)
-    font_sub = _load_font(_SANS_BOLD,    52)
-
-    line_gap     = 22   # px between headline lines
-    div_gap_top  = 36   # px from headline bottom to divider
-    div_gap_bot  = 30   # px from divider to subtext
-    sub_line_gap = 14   # px between subtext lines
-    underline_offset = 8   # px below text baseline for underline
-    underline_thickness = 4
-
-    # ── Build headline lines ──────────────────────────────────────────────────
-    hl_lines = _build_lines(draw, text.split(), font_std, font_emp, max_w)
-
-    # ── Measure headline block ────────────────────────────────────────────────
-    hl_line_heights = []
-    for line in hl_lines:
-        h = max(_text_height(draw, w, f) for w, f in line)
-        hl_line_heights.append(h)
-    hl_total_h = sum(hl_line_heights) + line_gap * max(0, len(hl_lines) - 1)
-
-    # ── Build + measure subtext lines ─────────────────────────────────────────
-    sub_words   = subtext.split()
-    sub_lines   = []
-    current, cw = [], 0.0
-    for word in sub_words:
-        w = _text_width(draw, word, font_sub)
-        sp = _text_width(draw, " ", font_sub)
+def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font, max_w: float) -> List[str]:
+    """Word-wrap text into lines that fit max_w."""
+    words, lines, current, cw = text.split(), [], [], 0.0
+    for word in words:
+        w  = _tw(draw, word, font)
+        sp = _tw(draw, " ", font)
         gap = sp if current else 0
         if current and cw + gap + w > max_w:
-            sub_lines.append(" ".join(current))
+            lines.append(" ".join(current))
             current, cw = [word], w
         else:
             current.append(word)
             cw += gap + w
     if current:
-        sub_lines.append(" ".join(current))
+        lines.append(" ".join(current))
+    return lines or [""]
 
-    sub_line_h  = _text_height(draw, sub_lines[0] if sub_lines else "A", font_sub)
+
+def _draw_centered(draw: ImageDraw.ImageDraw, text: str, font,
+                   y: int, canvas_w: int, color: tuple) -> int:
+    """Draw centered text, return new y after the line."""
+    w  = _tw(draw, text, font)
+    h  = _th(draw, text, font)
+    draw.text(((canvas_w - w) / 2, y), text, font=font, fill=color)
+    return y + h
+
+
+def _draw_top_section(
+    draw: ImageDraw.ImageDraw,
+    headline_text: str,
+    subtext: str,
+    canvas_w: int,
+    top_h: int,
+    padding: int,
+    text_color: tuple,
+    subtext_color: tuple,
+    divider_color: tuple,
+) -> None:
+    """
+    Renders the complete top panel:
+      - Headline parsed into italic runs + big emphasis run
+      - Divider
+      - Subtext (bold sans, centered)
+    Everything is vertically centered in top_h.
+    """
+    max_w        = canvas_w - padding * 2
+    run_gap      = 8    # px between headline runs
+    div_margin   = 38   # px above and below divider
+    sub_line_gap = 12   # px between subtext lines
+    divider_h    = 2
+
+    # ── Fonts ─────────────────────────────────────────────────────────────────
+    font_italic = _load_font(_SERIF_BOLD_ITALIC, 56)
+    font_sub    = _load_font(_SANS_BOLD, 58)
+
+    # ── Parse headline runs ───────────────────────────────────────────────────
+    runs = _parse_runs(headline_text)
+
+    # Build renderable items: each item = {"lines": [str], "font": font, "line_h": int}
+    items = []
+    for seg_text, is_emp in runs:
+        if is_emp:
+            font = _fit_font(draw, seg_text, _SERIF_BOLD, max_w)
+            items.append({"lines": [seg_text], "font": font,
+                          "line_h": _th(draw, seg_text, font)})
+        else:
+            wrapped = _wrap_text(draw, seg_text.strip(), font_italic, max_w)
+            lh = _th(draw, wrapped[0] if wrapped else "A", font_italic)
+            items.append({"lines": wrapped, "font": font_italic, "line_h": lh})
+
+    # ── Measure subtext ───────────────────────────────────────────────────────
+    sub_lines   = _wrap_text(draw, subtext, font_sub, max_w)
+    sub_line_h  = _th(draw, sub_lines[0] if sub_lines else "A", font_sub)
     sub_total_h = sub_line_h * len(sub_lines) + sub_line_gap * max(0, len(sub_lines) - 1)
 
-    # ── Total block height → center in top_h ─────────────────────────────────
-    divider_h   = 3
-    total_block = hl_total_h + div_gap_top + divider_h + div_gap_bot + sub_total_h
-    start_y     = max(padding, (top_h - total_block) // 2)
+    # ── Measure total block ───────────────────────────────────────────────────
+    hl_total_h = sum(
+        itm["line_h"] * len(itm["lines"]) + run_gap * max(0, len(itm["lines"]) - 1)
+        for itm in items
+    ) + run_gap * max(0, len(items) - 1)
 
-    # ── Draw headline lines ───────────────────────────────────────────────────
-    y = start_y
-    for i, line in enumerate(hl_lines):
-        # Measure full line width for horizontal centering
-        total_lw = sum(
-            _text_width(draw, w, f) + (_text_width(draw, " ", f) if j < len(line) - 1 else 0)
-            for j, (w, f) in enumerate(line)
-        )
-        x = (canvas_w - total_lw) / 2
+    total_h = hl_total_h + div_margin + divider_h + div_margin + sub_total_h
 
-        line_h = hl_line_heights[i]
+    # Vertically center the full block in top_h
+    y = max(padding, (top_h - total_h) // 2)
 
-        for j, (word, font) in enumerate(line):
-            w  = _text_width(draw, word, font)
-            sp = _text_width(draw, " ", font) if j < len(line) - 1 else 0
+    # ── Render headline runs ──────────────────────────────────────────────────
+    for itm in items:
+        for line in itm["lines"]:
+            y = _draw_centered(draw, line, itm["font"], y, canvas_w, text_color)
+            y += run_gap
+        # Remove last run_gap, replace with inter-run gap
+        y -= run_gap
+        y += run_gap  # same here — just keeps spacing consistent
 
-            # Baseline offset: align bottom of each word to the tallest in line
-            word_h  = _text_height(draw, word, font)
-            y_offset = line_h - word_h
-
-            draw.text((x, y + y_offset), word, font=font, fill=text_color)
-
-            # Underline emphasis words
-            if _is_emphasis(word):
-                ul_y = y + line_h + underline_offset
-                draw.line(
-                    [(x, ul_y), (x + w, ul_y)],
-                    fill=text_color,
-                    width=underline_thickness,
-                )
-
-            x += w + sp
-
-        y += line_h + line_gap
-
-    # Remove last line_gap, add div_gap_top
-    y = y - line_gap + div_gap_top
+    y += div_margin
 
     # ── Divider ───────────────────────────────────────────────────────────────
     draw.line(
@@ -220,13 +215,12 @@ def _draw_headline(
         fill=divider_color,
         width=divider_h,
     )
-    y += divider_h + div_gap_bot
+    y += divider_h + div_margin
 
     # ── Subtext ───────────────────────────────────────────────────────────────
     for line in sub_lines:
-        lw = _text_width(draw, line, font_sub)
-        draw.text(((canvas_w - lw) // 2, y), line, font=font_sub, fill=subtext_color)
-        y += sub_line_h + sub_line_gap
+        y = _draw_centered(draw, line, font_sub, y, canvas_w, subtext_color)
+        y += sub_line_gap
 
 
 def composite_ad(
@@ -252,11 +246,11 @@ def composite_ad(
     subtext       = layout.get("subtext",        "")
     text_color    = _hex_to_rgb(layout.get("text_color",      "#FFFFFF"))
     divider_color = _hex_to_rgb(layout.get("divider_color",   "#FFFFFF"))
-    subtext_color = _hex_to_rgb(layout.get("subtext_color",   "#CCCCCC"))
+    subtext_color = _hex_to_rgb(layout.get("subtext_color",   "#FFFFFF"))
 
     top_h    = int(canvas_h * top_pct)
     bottom_h = canvas_h - top_h
-    padding  = 80
+    padding  = 72
 
     # ── Canvas ────────────────────────────────────────────────────────────────
     canvas = Image.new("RGB", (canvas_w, canvas_h), bg_color)
@@ -280,15 +274,15 @@ def composite_ad(
     photo = photo.resize((canvas_w, bottom_h), Image.LANCZOS)
     canvas.paste(photo, (0, top_h))
 
-    # ── Top: headline + divider + subtext (all vertically centered) ───────────
-    _draw_headline(
+    # ── Top: full text section ────────────────────────────────────────────────
+    _draw_top_section(
         draw=draw,
-        text=headline_text,
+        headline_text=headline_text,
+        subtext=subtext,
         canvas_w=canvas_w,
         top_h=top_h,
         padding=padding,
         text_color=text_color,
-        subtext=subtext,
         subtext_color=subtext_color,
         divider_color=divider_color,
     )
