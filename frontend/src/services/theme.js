@@ -148,15 +148,32 @@ function loadGoogleFont(fontFamily) {
   document.head.appendChild(link);
 }
 
-// ── Theme override flag ─────────────────────────────────────────────────────
+// ── Persistence keys ────────────────────────────────────────────────────────
 
 // When this localStorage key is set to "default", AuthContext will skip
 // applyBrandTheme on login and session restore, preserving the platform default.
 // The flag is cleared automatically when the user actively saves a brand kit.
 const THEME_OVERRIDE_KEY = "theme_override";
 
+// Cached brand kit — written by applyBrandTheme, read on page refresh so the
+// correct theme is restored instantly without waiting for an API round-trip.
+const THEME_CACHE_KEY = "brand_kit_cache";
+
 export function isDefaultThemeOverrideActive() {
   return localStorage.getItem(THEME_OVERRIDE_KEY) === "default";
+}
+
+/**
+ * Returns the last applied brand kit from localStorage, or null if none.
+ * Used by AuthContext to restore the theme instantly on page refresh.
+ */
+export function getCachedBrandTheme() {
+  try {
+    const raw = localStorage.getItem(THEME_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -176,6 +193,12 @@ export function applyBrandTheme(brandKit) {
 
   // Saving a brand kit always clears the "use default" override.
   localStorage.removeItem(THEME_OVERRIDE_KEY);
+
+  // Persist so the theme can be restored instantly on next page refresh
+  // without waiting for a network round-trip.
+  try {
+    localStorage.setItem(THEME_CACHE_KEY, JSON.stringify(brandKit));
+  } catch { /* quota exceeded — ignore */ }
 
   const root = document.documentElement;
 
@@ -211,6 +234,9 @@ export function applyBrandTheme(brandKit) {
  * next company's login starts clean.
  */
 export function resetBrandTheme({ clearFlag = false } = {}) {
+  // Always clear the cache so a stale kit isn't restored on the next load.
+  localStorage.removeItem(THEME_CACHE_KEY);
+
   const root = document.documentElement;
   const props = [
     "--color-accent",

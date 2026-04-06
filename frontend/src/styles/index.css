@@ -368,6 +368,68 @@ body {
   }
   .sidebar__signout:hover { color: #f87171; }
 
+  /* ── MOBILE SIDEBAR ──────────────────────────────────────────────────────── */
+
+  .sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 199;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+  }
+
+  .sidebar-mobile-bar {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background-color: var(--color-sidebar-bg);
+    border-bottom: 1px solid var(--color-sidebar-border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .sidebar-hamburger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #e5e7eb;
+    padding: 6px;
+    border-radius: 6px;
+    transition: background-color 0.15s;
+  }
+  .sidebar-hamburger:hover { background-color: rgba(255,255,255,0.08); }
+
+  .gen-pill-overlay { left: 240px; }
+
+  @media (max-width: 767px) {
+    .sidebar {
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 200;
+      transform: translateX(-100%);
+      transition: transform 0.25s ease;
+      min-height: 100dvh;
+      @apply w-72;
+    }
+    .sidebar--open {
+      transform: translateX(0);
+      box-shadow: 6px 0 32px rgba(0, 0, 0, 0.6);
+    }
+    .sidebar-backdrop { display: block; }
+    .sidebar-mobile-bar { display: flex; }
+    .gen-pill-overlay { left: 0 !important; }
+    .page-main-content { padding: 1.25rem !important; }
+    .step-label { display: none !important; }
+  }
+
 
   /* ── INLINE ALERTS ───────────────────────────────────────────────────────── */
 

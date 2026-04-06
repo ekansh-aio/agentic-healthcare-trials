@@ -15,7 +15,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { PageWithSidebar, SectionCard, MetricSummaryCard, CampaignStatusBadge } from "../shared/Layout";
 import { adsAPI, analyticsAPI } from "../../services/api";
 import {
-  Send, Globe, Image, BarChart3, Play, Sparkles,
+  Send, Globe, Image, BarChart3, Sparkles,
   CheckCircle, Rocket, ChevronDown, ChevronUp, Zap, X, ImageOff,
   Share2, UploadCloud, ExternalLink, Download, Eye, AlertCircle,
   CheckCircle2, Loader2, Mic, PhoneCall, PhoneOff, Volume2, Radio, MessageSquare,
@@ -156,8 +156,8 @@ const TAB_TO_PATH = {
 };
 
 const TABS = [
-  { key: "overview",   label: "Overview",    icon: Send },
-  { key: "deploy",     label: "Deploy",      icon: UploadCloud },
+  { key: "overview",   label: "Overview",    icon: Eye },
+  { key: "deploy",     label: "Deploy",      icon: Rocket },
   { key: "distribute", label: "Distribute",  icon: Share2 },
   { key: "analytics",  label: "Analytics",   icon: BarChart3 },
 ];
@@ -292,10 +292,10 @@ export default function PublisherDashboard() {
 
       {/* KPI row */}
       <div className="grid grid-cols-4 gap-4 mb-8">
-        <MetricSummaryCard label="Ready to Publish" value={approved.length}                                        icon={Send} />
+        <MetricSummaryCard label="Ready to Publish" value={approved.length}                                        icon={Rocket} />
         <MetricSummaryCard label="Published"         value={published.length}                                       icon={Globe} />
         <MetricSummaryCard label="Total Campaigns"   value={ads.length}                                             icon={BarChart3} />
-        <MetricSummaryCard label="Active"            value={published.filter((a) => a.status !== "paused").length} icon={Play} />
+        <MetricSummaryCard label="Active"            value={published.filter((a) => a.status !== "paused").length} icon={Zap} />
       </div>
 
       {/* Tab bar */}

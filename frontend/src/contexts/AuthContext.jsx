@@ -11,7 +11,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { authAPI, brandKitAPI } from "../services/api";
-import { applyBrandTheme, resetBrandTheme, isDefaultThemeOverrideActive } from "../services/theme";
+import { applyBrandTheme, resetBrandTheme, isDefaultThemeOverrideActive, getCachedBrandTheme } from "../services/theme";
 
 const AuthContext = createContext(null);
 
@@ -20,19 +20,19 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Always start from a clean default theme. This ensures the login page
-    // never inherits a previous session's brand colors. Theme is only applied
-    // after a confirmed valid session is found below.
-    resetBrandTheme();
-
-    const token = localStorage.getItem("token");
+    const token  = localStorage.getItem("token");
     const stored = localStorage.getItem("user");
 
     if (token && stored) {
       try {
         setUser(JSON.parse(stored));
-        // Only apply brand theme if the user hasn't chosen to use the default.
+
         if (!isDefaultThemeOverrideActive()) {
+          // 1. Restore cached theme instantly — zero flash on refresh.
+          const cached = getCachedBrandTheme();
+          if (cached) applyBrandTheme(cached);
+
+          // 2. Refresh from API in the background; update if anything changed.
           brandKitAPI.get()
             .then((brandKit) => applyBrandTheme(brandKit))
             .catch(() => {});
@@ -40,6 +40,10 @@ export function AuthProvider({ children }) {
       } catch {
         localStorage.clear();
       }
+    } else {
+      // No active session — reset to platform default for the login page.
+      // This ensures a logged-out browser never shows a previous company's theme.
+      resetBrandTheme();
     }
 
     setLoading(false);
@@ -61,7 +65,7 @@ export function AuthProvider({ children }) {
     setUser(userData);
 
     // Fetch and apply brand theme after login — skip if user prefers default.
-    // Token is already in localStorage so brandKitAPI.get() is authenticated.
+    // applyBrandTheme also caches the kit in localStorage so it survives refresh.
     if (!isDefaultThemeOverrideActive()) {
       brandKitAPI.get()
         .then((brandKit) => applyBrandTheme(brandKit))

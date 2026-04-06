@@ -30,14 +30,14 @@
  *                           analytics or dashboard page.
  */
 
-import React from "react";
+import React, { useState } from "react";
 import { Navigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { useGeneration, GEN_STEPS } from "../../contexts/GenerationContext";
 import {
   LayoutDashboard, Users, FileText, BarChart3,
   LogOut, Shield, Eye, Megaphone, Globe, Bot,
-  Rocket, Share2, Sparkles, X, CheckCircle2, Activity,
+  Rocket, Share2, Sparkles, X, CheckCircle2, Activity, Menu,
 } from "lucide-react";
 
 // ─── RoleGuardedRoute ─────────────────────────────────────────────────────────
@@ -98,20 +98,39 @@ const SIDEBAR_LINKS_BY_ROLE = {
 // ─── AppSidebar ───────────────────────────────────────────────────────────────
 // Already included inside <PageWithSidebar> — no need to add manually.
 
-export function AppSidebar() {
+export function AppSidebar({ isOpen, onClose }) {
   const { role, logout } = useAuth();
   const location = useLocation();
   const navLinks = SIDEBAR_LINKS_BY_ROLE[role] || [];
 
+  const handleNavClick = () => {
+    if (onClose) onClose();
+  };
+
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${isOpen ? " sidebar--open" : ""}`}>
       {/* Brand / logo strip */}
       <div className="sidebar__brand">
-        <div className="flex items-center gap-2.5">
-          <div className="sidebar__logo-mark">
-            <Activity size={14} color="white" strokeWidth={2.5} />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="sidebar__logo-mark">
+              <Activity size={14} color="white" strokeWidth={2.5} />
+            </div>
+            <span className="sidebar__app-name">ClinAds Pro</span>
           </div>
-          <span className="sidebar__app-name">ClinAds Pro</span>
+          {/* Close button — visible only on mobile */}
+          {onClose && (
+            <button
+              onClick={onClose}
+              style={{
+                background: "none", border: "none", cursor: "pointer",
+                color: "#9ca3af", padding: "4px", display: "flex", borderRadius: "6px",
+              }}
+              aria-label="Close menu"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
         <p className="sidebar__role-label">{role?.replace("_", " ")}</p>
       </div>
@@ -126,6 +145,7 @@ export function AppSidebar() {
               key={link.path}
               to={link.path}
               className={isActive ? "sidebar__nav-link--active" : "sidebar__nav-link"}
+              onClick={handleNavClick}
             >
               <Icon size={16} />
               {link.label}
@@ -184,16 +204,24 @@ function GenerationPill() {
     const boff = bc - (progress / 100) * bc;
 
     return (
-      <div style={{
-        position: "fixed", top: 0, bottom: 0, right: 0, left: 240,
+      <div className="gen-pill-overlay" style={{
+        position: "fixed", top: 0, bottom: 0, right: 0,
         zIndex: 998,
         background: "rgba(10,18,30,0.97)",
         backdropFilter: "blur(20px)",
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        gap: 28, padding: "40px 24px",
+        overflowY: "auto",
         animation: "fadeIn 0.2s ease",
       }}>
         <style>{`@keyframes fadeIn{from{opacity:0}to{opacity:1}} @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+
+        {/* Inner wrapper — auto margins center it when there's room; padding lets it breathe */}
+        <div style={{
+          display: "flex", flexDirection: "column", alignItems: "center",
+          gap: 28, padding: "40px 24px",
+          margin: "auto",
+          width: "100%", maxWidth: 560,
+          boxSizing: "border-box",
+        }}>
 
         {/* Big progress ring */}
         <div style={{ position: "relative", width: bs, height: bs }}>
@@ -279,6 +307,8 @@ function GenerationPill() {
             {error ? "Dismiss" : "Done"}
           </button>
         )}
+
+        </div>{/* end inner wrapper */}
       </div>
     );
   }
@@ -347,10 +377,35 @@ function GenerationPill() {
 }
 
 export function PageWithSidebar({ children }) {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
   return (
     <div className="flex min-h-screen" style={{ backgroundColor: "var(--color-page-bg)" }}>
-      <AppSidebar />
-      <main className="flex-1 p-8 overflow-auto min-w-0 page-fade-in">{children}</main>
+      {/* Mobile backdrop — click to close */}
+      {sidebarOpen && (
+        <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      <AppSidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
+      <main className="flex-1 overflow-auto min-w-0 page-fade-in" style={{ display: "flex", flexDirection: "column" }}>
+        {/* Mobile top bar — hamburger + brand name */}
+        <div className="sidebar-mobile-bar">
+          <button
+            className="sidebar-hamburger"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Open navigation"
+          >
+            <Menu size={20} />
+          </button>
+          <span style={{ color: "#ffffff", fontWeight: 600, fontSize: "0.9rem" }}>ClinAds Pro</span>
+        </div>
+
+        <div className="page-main-content" style={{ flex: 1, padding: "2rem" }}>
+          {children}
+        </div>
+      </main>
+
       <GenerationPill />
     </div>
   );

@@ -419,10 +419,17 @@ async def create_review(
 
     ad_result = await db.execute(select(Advertisement).where(Advertisement.id == ad_id))
     ad = ad_result.scalar_one_or_none()
-    if ad and body.status == "approved":
-        ad.status = AdStatus.APPROVED
-    elif ad and body.review_type == "ethics":
-        ad.status = AdStatus.ETHICS_REVIEW
+    if ad:
+        if body.status == "approved":
+            # Strategy approved by PM → send to Ethics Manager queue
+            if body.review_type == "strategy":
+                ad.status = AdStatus.ETHICS_REVIEW
+            # Ethics approved → ready for publishing
+            elif body.review_type == "ethics":
+                ad.status = AdStatus.APPROVED
+        elif body.status in ("revision", "rejected"):
+            # Any rejection/revision → back to the general review queue
+            ad.status = AdStatus.UNDER_REVIEW
 
     await db.flush()
     return review
@@ -464,6 +471,20 @@ async def publish_advertisement(
         raise HTTPException(status_code=404, detail="Advertisement not found")
     if ad.status != AdStatus.APPROVED:
         raise HTTPException(status_code=400, detail="Advertisement must be approved before publishing")
+
+    # Verify an ethics review was formally completed before allowing publish
+    ethics_result = await db.execute(
+        select(Review).where(
+            Review.advertisement_id == ad_id,
+            Review.review_type == "ethics",
+            Review.status == "approved",
+        )
+    )
+    if not ethics_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail="Ethics review must be completed and approved before publishing",
+        )
 
     ad.status = AdStatus.PUBLISHED
     return ad
@@ -842,7 +863,19 @@ async def delete_advertisement(
     user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR])),
     db: AsyncSession = Depends(get_db),
 ):
-    """Permanently delete a campaign and all its related data. Study Coordinator only."""
+    """
+    Permanently delete a campaign and all its associated data:
+      - Database record (cascades to reviews, documents, etc.)
+      - ElevenLabs voice agent (if provisioned)
+      - Generated output files on disk  (outputs/<company_id>/<ad_id>/)
+      - Uploaded protocol documents     (uploads/docs/<company_id>/<ad_id>/)
+
+    Note: externally-deployed websites (Vercel, Netlify, etc.) cannot be
+    torn down automatically because deployment project IDs are not stored.
+    The Publisher must manually remove those deployments from the platform.
+    """
+    import shutil
+
     result = await db.execute(
         select(Advertisement).where(
             Advertisement.id == ad_id,
@@ -852,6 +885,51 @@ async def delete_advertisement(
     ad = result.scalar_one_or_none()
     if not ad:
         raise HTTPException(status_code=404, detail="Advertisement not found")
+
+    # ── 1. Delete ElevenLabs voice agent (best-effort) ────────────────────────
+    # TODO: verify ElevenLabs agent deletion is confirmed end-to-end in staging
+    # REVIEW: should a failed agent deletion block the overall delete or stay non-fatal?
+    bot_config = ad.bot_config or {}
+    if bot_config.get("elevenlabs_agent_id"):
+        try:
+            svc = VoicebotAgentService(db)
+            await svc.delete_agent(ad_id)
+            logger.info("Deleted ElevenLabs agent for ad %s", ad_id)
+        except Exception as exc:
+            # Non-fatal: log and continue — don't block deletion
+            logger.warning("Could not delete ElevenLabs agent for ad %s: %s", ad_id, exc)
+
+    # ── 2. Delete generated output files from disk ────────────────────────────
+    # TODO: test cleanup when outputs/ is mounted as a Docker volume (see docker-compose.yml)
+    # REVIEW: consider moving to async background task if file count is large
+    outputs_dir = os.path.normpath(
+        os.path.join(BACKEND_ROOT, "outputs", user.company_id, ad_id)
+    )
+    if os.path.isdir(outputs_dir):
+        try:
+            shutil.rmtree(outputs_dir)
+            logger.info("Deleted output files at %s", outputs_dir)
+        except Exception as exc:
+            logger.warning("Could not delete output files for ad %s: %s", ad_id, exc)
+
+    # ── 3. Delete uploaded protocol documents from disk ───────────────────────
+    # TODO: test cleanup when uploads/ is mounted as a Docker volume (see docker-compose.yml)
+    # REVIEW: confirm cascade also removes AdvertisementDocument DB rows (FK cascade must be set)
+    docs_dir = os.path.normpath(
+        os.path.join(BACKEND_ROOT, "uploads", "docs", user.company_id, ad_id)
+    )
+    if os.path.isdir(docs_dir):
+        try:
+            shutil.rmtree(docs_dir)
+            logger.info("Deleted protocol docs at %s", docs_dir)
+        except Exception as exc:
+            logger.warning("Could not delete protocol docs for ad %s: %s", ad_id, exc)
+
+    # ── 4. Delete DB record (cascades to reviews, documents, etc.) ────────────
+    # TODO: add a soft-delete / archive option before hard-delete for audit trail retention
+    # REVIEW: ensure all FK relationships have cascade="all, delete-orphan" in models.py
+    # REVIEW: externally-deployed sites (Vercel/Netlify) are NOT taken down — store
+    #         deployment project ID at publish time to enable programmatic teardown
     await db.delete(ad)
     await db.commit()
 

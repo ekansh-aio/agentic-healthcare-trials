@@ -589,7 +589,7 @@ export default function CampaignCreator() {
     start_date: "",
     end_date: "",
     patients_required: "",
-    platforms: [],
+    platforms: ["Meta Ads"], // default — user must keep ≥1 selected
     target_audience: { age_range: "", gender: "", interests: "" },
     trial_location: [],
     protocol_docs: [],
@@ -688,9 +688,16 @@ export default function CampaignCreator() {
     { id: 5, label: "Review",         icon: Check      },
   ];
 
+  const activePlatforms = form.campaign_category === "smm" ? form.social_platforms : form.platforms;
+
   const canNext = () => {
-    if (step === 1) return form.campaign_category !== "";
-    if (step === 2) return form.title.trim().length > 0;
+    if (step === 1) {
+      if (!form.campaign_category) return false;
+      // SMM: must pick ≥1 social platform before proceeding
+      if (form.campaign_category === "smm") return form.social_platforms.length > 0;
+      return true;
+    }
+    if (step === 2) return form.title.trim().length > 0 && activePlatforms.length > 0;
     return true;
   };
 
@@ -705,7 +712,8 @@ export default function CampaignCreator() {
           return (
             <React.Fragment key={s.id}>
               <div
-                style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, cursor: done ? "pointer" : "default" }}
+                title={s.label}
+                style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, cursor: done ? "pointer" : "default", minWidth: 0 }}
                 onClick={() => done && setStep(s.id)}
               >
                 <div style={{
@@ -719,10 +727,11 @@ export default function CampaignCreator() {
                 }}>
                   {done ? <Check size={15} strokeWidth={2.5} /> : <Icon size={15} />}
                 </div>
-                <span style={{
+                <span className="step-label" style={{
                   fontSize: "0.68rem", fontWeight: active ? 700 : 500,
                   color: active ? "var(--color-accent)" : done ? "var(--color-input-text)" : "var(--color-sidebar-text)",
-                  textAlign: "center", maxWidth: 64, lineHeight: 1.2,
+                  textAlign: "center", lineHeight: 1.2,
+                  whiteSpace: "nowrap", overflow: "hidden", maxWidth: "100%",
                 }}>
                   {s.label}
                 </span>
@@ -732,6 +741,7 @@ export default function CampaignCreator() {
                   flex: 1, height: 2, marginTop: 17,
                   backgroundColor: step > s.id ? "var(--color-accent)" : "var(--color-card-border)",
                   transition: "background-color 0.3s",
+                  minWidth: 8,
                 }} />
               )}
             </React.Fragment>
@@ -1029,11 +1039,12 @@ export default function CampaignCreator() {
                               );
                             })}
                           </div>
-                          {form.social_platforms.length > 0 && (
-                            <p style={{ fontSize: "0.72rem", marginTop: 10, color: "var(--color-accent)", fontWeight: 500 }}>
-                              {form.social_platforms.length} platform{form.social_platforms.length !== 1 ? "s" : ""} selected
-                            </p>
-                          )}
+                          <p style={{ fontSize: "0.72rem", marginTop: 10, fontWeight: 500,
+                            color: form.social_platforms.length > 0 ? "var(--color-accent)" : "#f97316" }}>
+                            {form.social_platforms.length > 0
+                              ? `${form.social_platforms.length} platform${form.social_platforms.length !== 1 ? "s" : ""} selected`
+                              : "⚠ Select at least 1 platform to continue"}
+                          </p>
                         </div>
                       )}
                     </div>
@@ -1124,6 +1135,47 @@ export default function CampaignCreator() {
                     )}
                   </div>
                 </div>
+
+                {/* ── Ad Platforms (non-SMM only; SMM platforms picked in Step 1) ── */}
+                {form.campaign_category !== "smm" && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1" style={{ color: "var(--color-input-text)" }}>
+                      Ad Platforms <span style={{ color: "var(--color-accent)" }}>*</span>
+                      <span style={{ fontWeight: 400, color: "var(--color-sidebar-text)", marginLeft: 6 }}>
+                        (select at least 1)
+                      </span>
+                    </label>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+                      {PLATFORMS.map((p) => {
+                        const active = form.platforms.includes(p);
+                        return (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => togglePlatform(p)}
+                            style={{
+                              padding: "5px 14px", borderRadius: 999, fontSize: "0.8rem",
+                              fontWeight: active ? 600 : 400, cursor: "pointer",
+                              border: `1.5px solid ${active ? "var(--color-accent)" : "var(--color-card-border)"}`,
+                              backgroundColor: active
+                                ? "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.12)"
+                                : "transparent",
+                              color: active ? "var(--color-accent)" : "var(--color-sidebar-text)",
+                              transition: "all 0.15s",
+                            }}
+                          >
+                            {p}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {form.platforms.length === 0 && (
+                      <p style={{ fontSize: "0.72rem", color: "#f97316", marginTop: 6, fontWeight: 500 }}>
+                        ⚠ Select at least 1 platform to continue
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
               <NavBar />
             </SectionCard>
