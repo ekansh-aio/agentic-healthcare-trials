@@ -237,6 +237,7 @@ class Advertisement(Base):
     reinforcement_logs = relationship("ReinforcementLog", back_populates="advertisement")
     voice_sessions     = relationship("VoiceSession", back_populates="advertisement", cascade="all, delete-orphan")
     chat_sessions      = relationship("ChatSession", back_populates="advertisement", cascade="all, delete-orphan")
+    survey_responses   = relationship("SurveyResponse", back_populates="advertisement", cascade="all, delete-orphan")
 
 
 # ─── Review ───────────────────────────────────────────────────────────────────
@@ -404,3 +405,25 @@ class ChatSession(Base):
     )
 
     advertisement = relationship("Advertisement", back_populates="chat_sessions")
+
+
+# ─── Survey Responses ─────────────────────────────────────────────────────────
+# Stores participant personal details + survey answers after completing a
+# questionnaire (website, chatbot, or voicebot campaign).
+
+class SurveyResponse(Base):
+    __tablename__ = "survey_responses"
+
+    id               = Column(String, primary_key=True, default=_uuid)
+    advertisement_id = Column(String, ForeignKey("advertisements.id"), nullable=False)
+    # Personal details collected after survey completion
+    full_name        = Column(String(256), nullable=False)
+    age              = Column(Integer, nullable=False)
+    sex              = Column(String(32), nullable=False)    # "male" | "female" | "other" | "prefer_not_to_say"
+    phone            = Column(String(32), nullable=False)
+    # Survey answers: [{question_id, question_text, selected_option, is_eligible}]
+    answers          = Column(JSON, default=list)
+    is_eligible      = Column(Boolean, nullable=True)        # overall eligibility result
+    created_at       = Column(DateTime, default=_now)
+
+    advertisement = relationship("Advertisement", back_populates="survey_responses")

@@ -14,6 +14,9 @@ import { ProtectedRoute } from "./components/shared/Layout";
 import LoginPage from "./components/auth/LoginPage";
 import OnboardingPage from "./components/onboarding/OnboardingPage";
 
+// Public
+import SurveyPage from "./components/public/SurveyPage";
+
 // Admin
 import AdminDashboard from "./components/admin/AdminDashboard";
 import CampaignCreator from "./components/admin/CampaignCreator";
@@ -44,6 +47,7 @@ function AppRoutes() {
       {/* Public */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
+      <Route path="/survey/:campaignId" element={<SurveyPage />} />
 
       {/* Study Coordinator routes */}
       <Route path="/study-coordinator" element={<ProtectedRoute allowedRoles={["study_coordinator"]}><AdminDashboard /></ProtectedRoute>} />

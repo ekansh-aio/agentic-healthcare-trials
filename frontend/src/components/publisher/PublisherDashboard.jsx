@@ -963,6 +963,26 @@ function VoicebotConfig({ ad }) {
   const [recommending,   setRecommending]   = useState(false);
   const [recommendation, setRecommendation] = useState(null);
 
+  // ── Outbound phone call test ────────────────────────────────────────────────
+  const [testPhone,       setTestPhone]       = useState("");
+  const [testCallStatus,  setTestCallStatus]  = useState("idle"); // idle | calling | done | error
+  const [testCallMsg,     setTestCallMsg]     = useState("");
+
+  const handleTestCall = async () => {
+    const phone = testPhone.trim();
+    if (!phone) return;
+    setTestCallStatus("calling");
+    setTestCallMsg("");
+    try {
+      await adsAPI.requestVoiceCall(ad.id, phone);
+      setTestCallStatus("done");
+      setTestCallMsg("Calling now — your phone should ring shortly.");
+    } catch (err) {
+      setTestCallStatus("error");
+      setTestCallMsg(err.message || "Call request failed.");
+    }
+  };
+
   // ── Live voice test session ─────────────────────────────────────────────────
   const [callStatus,  setCallStatus]  = useState("idle"); // idle | connecting | connected
   const [isSpeaking,  setIsSpeaking]  = useState(false);
@@ -1288,13 +1308,50 @@ function VoicebotConfig({ ad }) {
         </p>
       )}
 
-      {/* ── Live Voice Test ─────────────────────────────────────────── */}
+      {/* ── Test Voice Agent ────────────────────────────────────────── */}
       {agentStatus?.provisioned && (
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--color-border)" }}>
           <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-muted)", marginBottom: 10 }}>
             Test Voice Agent
           </p>
 
+          {/* Call My Phone */}
+          <div style={{ marginBottom: 14, padding: "12px 14px", borderRadius: 10, border: "1px solid var(--color-border)", background: "var(--color-bg)" }}>
+            <p style={{ fontSize: "0.75rem", fontWeight: 600, color: "var(--color-text)", marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
+              <PhoneCall size={12} style={{ color: "var(--color-accent)" }} /> Call My Phone
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                type="tel"
+                value={testPhone}
+                onChange={(e) => { setTestPhone(e.target.value); setTestCallStatus("idle"); setTestCallMsg(""); }}
+                placeholder="+1 (555) 000-0000"
+                className="field-input"
+                style={{ flex: 1, fontSize: "0.82rem", padding: "6px 10px" }}
+                disabled={testCallStatus === "calling"}
+              />
+              <button
+                onClick={handleTestCall}
+                disabled={testCallStatus === "calling" || !testPhone.trim()}
+                className="btn--primary"
+                style={{ fontSize: "0.8rem", padding: "6px 14px", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 5 }}
+              >
+                {testCallStatus === "calling"
+                  ? <><div className="spinner" style={{ width: 10, height: 10 }} /> Calling…</>
+                  : <><PhoneCall size={12} /> Call Me</>}
+              </button>
+            </div>
+            {testCallMsg && (
+              <p style={{ marginTop: 7, fontSize: "0.75rem", display: "flex", alignItems: "flex-start", gap: 5, color: testCallStatus === "error" ? "#ef4444" : "#10b981" }}>
+                <AlertCircle size={12} style={{ flexShrink: 0, marginTop: 1 }} />{testCallMsg}
+              </p>
+            )}
+            <p style={{ marginTop: 5, fontSize: "0.68rem", color: "var(--color-muted)" }}>
+              The agent will call this number via ElevenLabs/Twilio.
+            </p>
+          </div>
+
+          {/* Browser mic test */}
           {callStatus === "connected" ? (
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: 10, border: "1px solid rgba(16,185,129,0.3)", backgroundColor: "rgba(16,185,129,0.05)", marginBottom: 10 }}>

@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 
 from app.db.database import init_db
 from app.api.routes import auth, onboarding, users, advertisements, documents, analytics, brand_kit, company
+from app.api.routes import chat, survey_responses
 from app.api.routes import chat, platform_connections
 from app.core.config import settings
 
@@ -24,9 +25,14 @@ async def _security_headers(request: Request, call_next):
     # HSTS only makes sense when served over HTTPS — skip if no HTTPS configured.
     if not settings.DEBUG and os.getenv("ENABLE_HSTS", "false").lower() == "true":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    # Hosted landing pages (/static/pages/*) are public and may embed widgets —
+    # Hosted landing pages and the website preview endpoint may be framed —
     # skip X-Frame-Options for those paths only.
-    if not request.url.path.startswith("/static/pages/"):
+    _path = request.url.path
+    _frameable = (
+        _path.startswith("/static/pages/") or
+        _path.endswith("/website")
+    )
+    if not _frameable:
         response.headers["X-Frame-Options"] = "DENY"
     return response
 
@@ -96,6 +102,9 @@ app.include_router(documents.router,      prefix="/api")
 app.include_router(advertisements.router, prefix="/api")
 app.include_router(analytics.router,      prefix="/api")
 app.include_router(brand_kit.router,      prefix="/api")
+app.include_router(company.router,        prefix="/api")
+app.include_router(chat.router,             prefix="/api")
+app.include_router(survey_responses.router, prefix="/api")
 app.include_router(company.router,               prefix="/api")
 app.include_router(chat.router,                  prefix="/api")
 app.include_router(platform_connections.router,  prefix="/api")

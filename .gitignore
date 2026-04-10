@@ -42,3 +42,10 @@ Thumbs.db
 
 # ─── Claude Code ──────────────────────────────────────────
 .claude/settings.local.json
+
+# ─── TLS / Certificates ───────────────────────────────────
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx

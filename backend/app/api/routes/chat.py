@@ -7,7 +7,7 @@ Flow:
     → load Advertisement from DB (in-memory TTL cache)
     → find or create ChatSession for (campaignId, sessionId)
     → build system prompt strictly from THIS campaign's data
-    → call Claude Haiku via Bedrock or Anthropic API
+    → call GPT-5 via Azure OpenAI (falls back to Anthropic if Azure not configured)
     → persist updated message history to ChatSession
     → return { reply, sessionId }
 
@@ -31,10 +31,40 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from urllib.parse import urlparse
+
+from openai import AsyncAzureOpenAI, AsyncOpenAI
+
 from app.core.bedrock import get_async_client, get_model, is_configured
 from app.core.config import settings
 from app.db.database import get_db
 from app.models.models import Advertisement, ChatSession
+
+
+def _get_chat_client():
+    """Return async OpenAI-compatible client for the chat widget.
+
+    Priority:
+      1. AZURE_CHAT_ENDPOINT + AZURE_CHAT_API_KEY (dedicated chat resource)
+      2. AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY (shared resource fallback)
+      3. OPENAI_API_KEY (standard OpenAI)
+      4. None → fall back to Anthropic via bedrock helpers
+    """
+    endpoint = settings.AZURE_CHAT_ENDPOINT or settings.AZURE_OPENAI_ENDPOINT
+    api_key  = settings.AZURE_CHAT_API_KEY  or settings.AZURE_OPENAI_API_KEY
+    if endpoint and api_key:
+        # Strip to base URL — SDK builds the deployment path itself.
+        # Handles both "https://resource.openai.azure.com" and full deployment URLs.
+        parsed = urlparse(endpoint)
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+        return AsyncAzureOpenAI(
+            azure_endpoint=base_url,
+            api_key=api_key,
+            api_version=settings.AZURE_OPENAI_API_VERSION,
+        )
+    if settings.OPENAI_API_KEY:
+        return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    return None
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
@@ -313,30 +343,51 @@ async def chat(
     messages = [{"role": m["role"], "content": m["content"]} for m in history]
     messages.append({"role": "user", "content": body.message})
 
-    # 5. Call Haiku or return mock response
-    if not is_configured():
-        global _mock_idx
-        reply = _MOCK_REPLIES[_mock_idx % len(_MOCK_REPLIES)]
-        _mock_idx += 1
-    else:
+    # 5. Call GPT-5 (Azure OpenAI) → OpenAI → Anthropic fallback → mock
+    oai_client = _get_chat_client()
+    system_prompt = _build_system_prompt(ad)
+
+    if oai_client is not None:
+        try:
+            oai_messages = [{"role": "system", "content": system_prompt}] + messages
+            response = await oai_client.chat.completions.create(
+                model=settings.AZURE_CHAT_DEPLOYMENT,
+                max_completion_tokens=1024,
+                messages=oai_messages,
+            )
+            choice = response.choices[0]
+            print(f"[CHAT DEBUG] finish_reason={choice.finish_reason!r} content={choice.message.content!r}", flush=True)
+            reply = (choice.message.content or "").strip()
+        except Exception as exc:
+            logger.error("Chat Azure/OpenAI error for campaign %s: %s", campaign_id, exc)
+            raise HTTPException(status_code=502, detail="AI service temporarily unavailable")
+    elif is_configured():
         try:
             client   = get_async_client()
             response = await client.messages.create(
                 model=get_model(),
                 max_tokens=512,
-                system=_build_system_prompt(ad),
+                system=system_prompt,
                 messages=messages,
             )
             reply = response.content[0].text.strip()
         except Exception as exc:
             logger.error("Chat LLM error for campaign %s: %s", campaign_id, exc)
             raise HTTPException(status_code=502, detail="AI service temporarily unavailable")
+    else:
+        global _mock_idx
+        reply = _MOCK_REPLIES[_mock_idx % len(_MOCK_REPLIES)]
+        _mock_idx += 1
 
-    # 6. Persist updated history (SQLAlchemy JSON column requires reassignment to detect mutation)
-    updated = history + [
-        {"role": "user",      "content": body.message},
-        {"role": "assistant", "content": reply},
-    ]
-    session.messages = updated
+    # 6. Persist updated history only when we have a real reply.
+    # Empty replies (e.g. finish_reason=length) are not saved so they don't
+    # corrupt the history and consume tokens on the next turn.
+    if reply:
+        updated = history + [
+            {"role": "user",      "content": body.message},
+            {"role": "assistant", "content": reply},
+        ]
+        # Keep last 20 messages to avoid runaway context growth
+        session.messages = updated[-20:]
 
     return ChatResponse(reply=reply, sessionId=session.session_id)

@@ -364,3 +364,34 @@ class RewriteStrategyRequest(BaseModel):
 class RewriteQuestionRequest(BaseModel):
     question: dict
     instruction: str
+
+
+# ─── Survey Response Schemas ──────────────────────────────────────────────────
+
+class SurveyAnswerItem(BaseModel):
+    question_id:   str
+    question_text: str
+    selected_option: str
+    is_eligible:   Optional[bool] = None
+
+class SurveyResponseCreate(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=256)
+    age:       int = Field(..., ge=1, le=120)
+    sex:       str = Field(..., pattern="^(male|female|other|prefer_not_to_say)$")
+    phone:     str = Field(..., min_length=5, max_length=32)
+    answers:   List[SurveyAnswerItem] = []
+    is_eligible: Optional[bool] = None
+
+class SurveyResponseOut(BaseModel):
+    id:               str
+    advertisement_id: str
+    full_name:        str
+    age:              int
+    sex:              str
+    phone:            str
+    answers:          List[Dict[str, Any]]
+    is_eligible:      Optional[bool] = None
+    created_at:       datetime
+
+    class Config:
+        from_attributes = True

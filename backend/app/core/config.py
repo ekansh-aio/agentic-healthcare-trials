@@ -51,12 +51,17 @@ class Settings(BaseSettings):
     # Chat widget model (Haiku — lightweight, fast, stays within Bedrock)
     CHAT_MODEL: str = "us.anthropic.claude-haiku-3-5-20241022"
 
-    # Azure AI Foundry / Azure OpenAI (image generation)
+    # Azure AI Foundry / Azure OpenAI
     # Set AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY to use Azure Foundry.
     # Leave blank to fall back to standard OpenAI (OPENAI_API_KEY).
     AZURE_OPENAI_ENDPOINT: Optional[str] = None
     AZURE_OPENAI_API_KEY: Optional[str] = None
     AZURE_OPENAI_API_VERSION: str = "2025-04-01-preview"
+    # Azure OpenAI Chat (GPT-5) — separate resource from image gen if needed
+    # If blank, falls back to AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_KEY
+    AZURE_CHAT_ENDPOINT: Optional[str] = None
+    AZURE_CHAT_API_KEY: Optional[str] = None
+    AZURE_CHAT_DEPLOYMENT: str = "gpt-5"
     # Standard OpenAI fallback
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_IMAGE_MODEL: str = "gpt-image-1.5"

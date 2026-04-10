@@ -510,3 +510,28 @@ export const analyticsAPI = {
       body: JSON.stringify(data),
     }),
 };
+
+// ─── Survey Responses ─────────────────────────────────────────────────────────
+
+export const surveyAPI = {
+  // Submit participant details + answers (public — no auth token required).
+  submit: (adId, data) =>
+    fetch(`${API_BASE}/advertisements/${adId}/survey-responses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }).then(async (res) => {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || `Submission failed (HTTP ${res.status})`);
+      }
+      return res.json();
+    }),
+
+  // List all responses for a campaign (study coordinator — auth required).
+  list: (adId) => request(`/advertisements/${adId}/survey-responses`),
+
+  // Get a single response with full details.
+  get: (adId, responseId) =>
+    request(`/advertisements/${adId}/survey-responses/${responseId}`),
+};

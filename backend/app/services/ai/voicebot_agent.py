@@ -402,20 +402,24 @@ Respond with ONLY a valid JSON object, no markdown:
 
     async def _build_system_prompt(self, ad: Advertisement) -> str:
         """
-        Build the ElevenLabs agent system prompt.
+        Build the ElevenLabs agent system prompt with full campaign context.
 
-        Priority:
-        1. Company-trained voicebot SKILL.md (from SkillConfig table)
-        2. Default prompt generated from company name + industry
-
-        Always appends runtime overrides from bot_config (style, compliance).
+        Sections injected (matching the agreed context table):
+          - Identity & tone
+          - Trial facts (title, category, location, dates, duration, summary)
+          - Target audience & messaging (for guidance only — not to recite)
+          - Eligibility criteria (inclusion / exclusion)
+          - Screening questionnaire (agent walks through conversationally)
+          - Approved FAQs (may quote verbatim)
+          - Ethical / compliance guardrails (enforced silently)
+          - Voice rules
         """
         company_result = await self.db.execute(
             select(Company).where(Company.id == ad.company_id)
         )
         company = company_result.scalar_one_or_none()
-        company_name = company.name if company else "our company"
-        industry = company.industry if company else "our industry"
+        company_name = company.name     if company else "our company"
+        industry     = company.industry if company else "our industry"
 
         skill_result = await self.db.execute(
             select(SkillConfig).where(
@@ -425,37 +429,170 @@ Respond with ONLY a valid JSON object, no markdown:
         )
         skill = skill_result.scalar_one_or_none()
 
-        base_prompt = (
-            skill.skill_md
-            if (skill and skill.skill_md)
-            else self._default_voicebot_prompt(company_name, industry)
-        )
+        # ── Pull campaign fields ──────────────────────────────────────────────
+        bot_config  : Dict[str, Any] = ad.bot_config   or {}
+        strategy    : Dict[str, Any] = ad.strategy_json or {}
+        website_reqs: Dict[str, Any] = ad.website_reqs  or {}
+        messaging   : Dict[str, Any] = strategy.get("messaging", {}) or {}
 
-        bot_config: Dict[str, Any] = ad.bot_config or {}
-        style = bot_config.get("conversation_style", "professional and helpful")
+        bot_name   = bot_config.get("name", "Assistant")
+        style      = bot_config.get("conversation_style", "professional and helpful")
         compliance = bot_config.get("compliance_notes", "")
+        first_msg  = bot_config.get("first_message", "")
 
-        addendum = f"\n\n## Runtime Configuration\nConversation style: {style}."
+        exec_summary = strategy.get("executive_summary", "")
+        target_aud   = strategy.get("target_audience", {})
+        tone         = messaging.get("tone", "")
+        core_message = messaging.get("core_message", "")
+
+        must_have  = website_reqs.get("must_have",    [])
+        must_avoid = website_reqs.get("must_avoid",   [])
+        faqs       = website_reqs.get("faqs",         [])
+        eth_flags  = website_reqs.get("ethical_flags",[])
+
+        # trial_location is [{country, city}]
+        locations = ad.trial_location or []
+        loc_str = ", ".join(
+            f"{l.get('city', '')}, {l.get('country', '')}".strip(", ")
+            for l in locations if isinstance(l, dict)
+        ) if locations else ""
+
+        start_date = str(ad.trial_start_date) if ad.trial_start_date else ""
+        end_date   = str(ad.trial_end_date)   if ad.trial_end_date   else ""
+        duration   = ad.duration or ""
+
+        # questionnaire: {questions: [{id, text, type, options, required}]}
+        questionnaire = ad.questionnaire or {}
+        questions = questionnaire.get("questions", []) if isinstance(questionnaire, dict) else []
+
+        # ── Base identity (skill.md overrides the default identity block only) ─
+        if skill and skill.skill_md:
+            identity_block = skill.skill_md
+        else:
+            identity_block = (
+                f"You are {bot_name}, a voice assistant representing {company_name} "
+                f"in the {industry} sector. "
+                f"You are calling because the person expressed interest in the \"{ad.title}\" campaign. "
+                "Your goal is to answer their questions, walk them through the eligibility screening, "
+                "and if they qualify, encourage them to take the next step."
+            )
+
+        # ── Build the prompt sections ─────────────────────────────────────────
+        sections: list[str] = [identity_block]
+
+        # 1. Trial facts
+        facts_lines = [f"- Trial name: {ad.title}"]
+        if ad.campaign_category:
+            facts_lines.append(f"- Category: {ad.campaign_category}")
+        if exec_summary:
+            facts_lines.append(f"- About this trial: {exec_summary}")
+        if loc_str:
+            facts_lines.append(f"- Location(s): {loc_str}")
+        if start_date:
+            facts_lines.append(f"- Enrolment opens: {start_date}")
+        if end_date:
+            facts_lines.append(f"- Enrolment closes: {end_date}")
+        if duration:
+            facts_lines.append(f"- Trial duration: {duration}")
+        sections.append("## Trial Facts\n" + "\n".join(facts_lines))
+
+        # 2. Audience & messaging — guidance only, never recite
+        guidance_lines = []
+        if target_aud:
+            guidance_lines.append(
+                f"The person you're speaking with likely matches this profile: "
+                f"{json.dumps(target_aud) if isinstance(target_aud, dict) else target_aud}. "
+                "Use this to tailor your language — do NOT read this description aloud."
+            )
+        if tone:
+            guidance_lines.append(f"Speak in a {tone} tone — do NOT mention this instruction.")
+        if core_message:
+            guidance_lines.append(
+                f"The underlying message to convey is: \"{core_message}\" — "
+                "weave this in naturally, never quote it verbatim."
+            )
+        if guidance_lines:
+            sections.append("## Audience & Tone Guidance (internal — never recite)\n" + "\n".join(guidance_lines))
+
+        # 3. Eligibility criteria
+        if must_have or must_avoid:
+            elig_lines = []
+            if must_have:
+                elig_lines.append(
+                    "Inclusion criteria (share these conversationally when asked):\n" +
+                    "\n".join(f"  - {c}" for c in must_have)
+                )
+            if must_avoid:
+                elig_lines.append(
+                    "Exclusion criteria (mention gently only if directly relevant):\n" +
+                    "\n".join(f"  - {c}" for c in must_avoid)
+                )
+            sections.append("## Eligibility Criteria\n" + "\n\n".join(elig_lines))
+
+        # 4. Screening questionnaire
+        if questions:
+            q_lines = [
+                "Walk through these screening questions one at a time, conversationally — "
+                "do NOT read them as a list. Wait for the answer before asking the next question. "
+                "If the caller answers in a way that makes them ineligible, be empathetic and honest.\n"
+            ]
+            for i, q in enumerate(questions, 1):
+                q_text    = q.get("text", "")
+                q_options = q.get("options", [])
+                q_req     = q.get("required", True)
+                line = f"Q{i}: {q_text}"
+                if q_options:
+                    line += f" (options: {', '.join(str(o) for o in q_options)})"
+                if not q_req:
+                    line += " [optional]"
+                q_lines.append(line)
+            q_lines.append(
+                "\nAfter all questions are answered, summarise eligibility warmly. "
+                "If eligible, say the team will follow up. "
+                "If not, thank them sincerely and let them know other trials may suit them."
+            )
+            sections.append("## Screening Questions\n" + "\n".join(q_lines))
+
+        # 5. Approved FAQs
+        if faqs:
+            faq_lines = ["You may quote these answers verbatim when the caller asks:"]
+            for faq in faqs:
+                if isinstance(faq, dict):
+                    faq_lines.append(f"Q: {faq.get('question', '')}\nA: {faq.get('answer', '')}")
+                else:
+                    faq_lines.append(str(faq))
+            sections.append("## Approved FAQs\n" + "\n\n".join(faq_lines))
+
+        # 6. Guardrails (ethical flags + compliance — enforced silently)
+        guardrail_lines = []
+        if eth_flags:
+            guardrail_lines.append(
+                "Ethical guardrails (enforce silently — never mention to the caller):\n" +
+                "\n".join(f"  - {f}" for f in eth_flags)
+            )
         if compliance:
-            addendum += f"\nCompliance rules: {compliance}"
-        addendum += (
-            "\n\nCRITICAL VOICE RULES: You are speaking out loud via audio. "
-            "Keep every response to 1–2 short sentences maximum. "
-            "Never use bullet points, markdown, or lists. "
-            "Sound natural and conversational, like a real person on the phone."
+            guardrail_lines.append(
+                f"Compliance rules (enforce silently — never mention to the caller):\n  - {compliance}"
+            )
+        if guardrail_lines:
+            sections.append("## Guardrails (internal — never recite or acknowledge)\n" + "\n\n".join(guardrail_lines))
+
+        # 7. Conversation style
+        sections.append(f"## Conversation Style\nSpeak in a {style} manner throughout the call.")
+
+        # 8. Voice rules (always last)
+        sections.append(
+            "## Critical Voice Rules\n"
+            "You are speaking out loud via a phone call — not typing.\n"
+            "- Keep every turn to 1–2 short sentences. Never exceed 3.\n"
+            "- Never use bullet points, numbered lists, markdown, or headers.\n"
+            "- Never spell out punctuation (no 'dash', 'colon', 'asterisk').\n"
+            "- Speak naturally — contractions, pauses, filler affirmations ('Sure!', 'Got it.') are fine.\n"
+            "- If asked something you don't know, say so honestly and offer to have a human follow up.\n"
+            "- Never fabricate trial data, timelines, or medical claims."
         )
 
-        return base_prompt + addendum
-
-    @staticmethod
-    def _default_voicebot_prompt(company_name: str, industry: str) -> str:
-        return (
-            f"You are a friendly and knowledgeable voice assistant representing {company_name}, "
-            f"a company in the {industry} industry. "
-            "Your goal is to help callers learn about products and services, "
-            "answer their questions clearly, and guide them toward the next step. "
-            "Be warm, concise, and professional at all times."
-        )
+        return "\n\n".join(sections)
 
     # ──────────────────────────────────────────────────────────────────────────
     # DB helpers
