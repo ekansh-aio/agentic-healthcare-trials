@@ -278,6 +278,12 @@ class AdAnalytics(Base):
     impressions      = Column(Integer, nullable=True)
     conversions      = Column(Integer, nullable=True)
     cost_per_click   = Column(Float, nullable=True)
+    # Meta-sourced fields (populated by /meta-insights sync)
+    spend            = Column(Float, nullable=True)       # total USD spend
+    reach            = Column(Integer, nullable=True)     # unique users reached
+    cpm              = Column(Float, nullable=True)       # cost per 1000 impressions
+    date_label       = Column(String(32), nullable=True)  # "YYYY-MM-DD" for time-series
+    source           = Column(String(16), default="local") # "meta" | "local"
 
     advertisement = relationship("Advertisement", back_populates="analytics")
 

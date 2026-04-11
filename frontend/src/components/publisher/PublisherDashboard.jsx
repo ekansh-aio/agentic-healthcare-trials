@@ -20,11 +20,17 @@ import {
   Share2, UploadCloud, ExternalLink, Download, Eye, AlertCircle,
   CheckCircle2, Loader2, Mic, PhoneCall, PhoneOff, Volume2, Radio, MessageSquare,
   Link2, Link2Off, Settings, RefreshCw, ChevronDown as ChevDown, SlidersHorizontal,
+  ToggleLeft, ToggleRight, Trash2, Pencil, TrendingUp, Target, Clock, Calendar,
+  Play, Pause, RotateCcw, ChevronRight, Info,
 } from "lucide-react";
+import {
+  LineChart, Line, BarChart, Bar, XAxis, YAxis,
+  CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from "recharts";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const hasType = (ad, type) => Array.isArray(ad.ad_type) ? ad.ad_type.includes(type) : ad.ad_type === type;
-const typeLabel = (ad) => (Array.isArray(ad.ad_type) ? ad.ad_type : [ad.ad_type]).join(", ");
+const typeLabel = (ad) => !ad ? "" : (Array.isArray(ad.ad_type) ? ad.ad_type : [ad.ad_type]).join(", ");
 
 // ─── Deploy platform definitions ─────────────────────────────────────────────
 const DEPLOY_PLATFORMS = [
@@ -105,6 +111,7 @@ const SOCIAL_PLATFORMS = {
 const PATH_TO_TAB = {
   "/publisher/deploy":      "deploy",
   "/publisher/distribute":  "distribute",
+  "/publisher/manage":      "manage",
   "/publisher/analytics":   "analytics",
   "/publisher/settings":    "settings",
 };
@@ -112,6 +119,7 @@ const TAB_TO_PATH = {
   overview:    "/publisher",
   deploy:      "/publisher/deploy",
   distribute:  "/publisher/distribute",
+  manage:      "/publisher/manage",
   analytics:   "/publisher/analytics",
   settings:    "/publisher/settings",
 };
@@ -120,6 +128,7 @@ const TABS = [
   { key: "overview",   label: "Overview",    icon: Eye },
   { key: "deploy",     label: "Deploy",      icon: Rocket },
   { key: "distribute", label: "Distribute",  icon: Share2 },
+  { key: "manage",     label: "Manage Ads",  icon: TrendingUp },
   { key: "analytics",  label: "Analytics",   icon: BarChart3 },
   { key: "settings",   label: "Settings",    icon: SlidersHorizontal },
 ];
@@ -176,6 +185,10 @@ export default function PublisherDashboard() {
   const published = ads.filter((a) => a.status === "published");
 
   // ── Overview handlers ────────────────────────────────────────────────────
+  const handleUpdateAd = (updatedAd) => {
+    setAds((p) => p.map((a) => (a.id === updatedAd.id ? updatedAd : a)));
+  };
+
   const handlePublish = async (adId) => {
     setPublishing(adId); setPublishError(null);
     try {
@@ -387,6 +400,7 @@ export default function PublisherDashboard() {
           expandedId={expandedId}
           onToggle={(id) => setExpandedId((p) => (p === id ? null : id))}
           onPublish={handlePublish}
+          onUpdateAd={handleUpdateAd}
           onPreviewAd={setPreviewAd}
           onViewDetail={(id) => navigate(`/publisher/campaign/${id}`)}
           hostingId={hostingId}
@@ -431,6 +445,11 @@ export default function PublisherDashboard() {
         />
       )}
 
+      {/* ── Manage Ads ── */}
+      {activeTab === "manage" && (
+        <ManageTab ads={ads} metaConnection={metaConnection} />
+      )}
+
       {/* ── Analytics ── */}
       {activeTab === "analytics" && <PublisherAnalytics ads={published} />}
 
@@ -455,8 +474,88 @@ export default function PublisherDashboard() {
   );
 }
 
+// ─── Deployment checklist helper ─────────────────────────────────────────────
+function getDeployChecklist(ad) {
+  const isAds   = hasType(ad, "ads");
+  const isWeb   = hasType(ad, "website");
+  const isVoice = hasType(ad, "voicebot");
+  const items   = [];
+
+  if (isAds) {
+    const count = ad.output_files?.length || 0;
+    items.push({
+      key:      "creatives",
+      label:    "Ad creatives generated",
+      done:     count > 0,
+      detail:   count > 0 ? `${count} creative${count !== 1 ? "s" : ""} ready` : "No creatives yet",
+      note:     count === 0 ? "Ask your Study Coordinator to generate ad creatives for this campaign." : null,
+      action:   null,
+    });
+    items.push({
+      key:      "distributed",
+      label:    "Distributed to Meta",
+      done:     !!ad.bot_config?.meta_campaign_id,
+      detail:   ad.bot_config?.meta_campaign_id
+        ? `Campaign ID: ${ad.bot_config.meta_campaign_id}`
+        : "Not yet distributed — go to the Distribute tab",
+      note:     null,
+      action:   !ad.bot_config?.meta_campaign_id ? { type: "navigate", path: "/publisher/distribute", label: "Go to Distribute" } : null,
+    });
+  }
+
+  if (isWeb) {
+    items.push({
+      key:      "website_generated",
+      label:    "Website generated",
+      done:     !!ad.output_url,
+      detail:   ad.output_url ? "Landing page is ready" : "Not yet generated",
+      note:     !ad.output_url ? "Ask your Study Coordinator to generate the campaign website." : null,
+      action:   null,
+    });
+    items.push({
+      key:      "website_hosted",
+      label:    "Landing page hosted",
+      done:     !!ad.hosted_url,
+      detail:   ad.hosted_url || "Needs to be hosted so Meta can link to it",
+      note:     null,
+      action:   !ad.hosted_url
+        ? (ad.output_url
+            ? { type: "host", label: "Host Page" }
+            : { type: "disabled", label: "Generate website first" })
+        : null,
+    });
+    // External deploy (Vercel/Netlify/etc.) is optional — shown as a tip, not a blocker
+  }
+
+  if (isVoice) {
+    const configured = !!(ad.bot_config?.voice_id && ad.bot_config?.first_message);
+    items.push({
+      key:      "voice_configured",
+      label:    "Voice agent configured",
+      done:     configured,
+      detail:   configured ? `Voice: ${ad.bot_config.voice_id}` : "Name, voice, and opening message not set",
+      note:     !configured ? "Expand a published campaign in Overview and configure the Voicebot tab." : null,
+      action:   null,
+    });
+    items.push({
+      key:      "voice_provisioned",
+      label:    "Voice agent provisioned",
+      done:     !!ad.bot_config?.elevenlabs_agent_id,
+      detail:   ad.bot_config?.elevenlabs_agent_id
+        ? `Agent ID: ${ad.bot_config.elevenlabs_agent_id}`
+        : "Not yet provisioned on ElevenLabs",
+      note:     null,
+      action:   !ad.bot_config?.elevenlabs_agent_id
+        ? { type: "navigate", path: `/publisher/campaign/${ad.id}`, label: "Open Campaign Details" }
+        : null,
+    });
+  }
+
+  return items;
+}
+
 // ─── Overview Tab ─────────────────────────────────────────────────────────────
-function OverviewTab({ approved, published, publishing, publishError, expandedId, onToggle, onPublish, onPreviewAd, onViewDetail, hostingId, hostError, onHostPage }) {
+function OverviewTab({ approved, published, publishing, publishError, expandedId, onToggle, onPublish, onUpdateAd, onPreviewAd, onViewDetail, hostingId, hostError, onHostPage }) {
   return (
     <div className="space-y-4">
       {publishError && (
@@ -469,18 +568,20 @@ function OverviewTab({ approved, published, publishing, publishError, expandedId
           <p style={{ fontSize: "0.85rem", color: "#ef4444" }}>{publishError}</p>
         </div>
       )}
+
+      {/* ── Campaigns being set up ─────────────────────────────────────────── */}
       <SectionCard
-        title="Ready to Publish"
+        title="Campaign Setup"
         subtitle={approved.length > 0
-          ? `${approved.length} campaign${approved.length !== 1 ? "s" : ""} awaiting deployment`
-          : "All campaigns are up to date"}
+          ? `${approved.length} approved campaign${approved.length !== 1 ? "s" : ""} ready to deploy`
+          : "All approved campaigns have been deployed"}
       >
         {approved.length === 0 ? (
           <div className="flex flex-col items-center py-10 gap-3">
             <div className="metric-tile__icon-wrap" style={{ width: 48, height: 48 }}>
               <Rocket size={20} style={{ color: "var(--color-sidebar-text)" }} />
             </div>
-            <p className="text-sm" style={{ color: "var(--color-sidebar-text)" }}>No campaigns waiting to be published</p>
+            <p className="text-sm" style={{ color: "var(--color-sidebar-text)" }}>No campaigns waiting to be deployed</p>
           </div>
         ) : (
           approved.map((ad) => (
@@ -488,26 +589,29 @@ function OverviewTab({ approved, published, publishing, publishError, expandedId
               key={ad.id} ad={ad}
               expanded={expandedId === ad.id} onToggle={() => onToggle(ad.id)}
               publishing={publishing}
-              onPublish={onPublish} onPreviewAd={onPreviewAd} onViewDetail={onViewDetail}
+              onPublish={onPublish} onUpdateAd={onUpdateAd}
+              onPreviewAd={onPreviewAd} onViewDetail={onViewDetail}
               hostingId={hostingId} hostError={hostError} onHostPage={onHostPage}
             />
           ))
         )}
       </SectionCard>
 
+      {/* ── Active campaigns ───────────────────────────────────────────────── */}
       <SectionCard
-        title="Published Campaigns"
+        title="Active Campaigns"
         subtitle={`${published.length} live deployment${published.length !== 1 ? "s" : ""}`}
       >
         {published.length === 0 ? (
-          <p className="text-sm py-4" style={{ color: "var(--color-sidebar-text)" }}>No published campaigns yet</p>
+          <p className="text-sm py-4" style={{ color: "var(--color-sidebar-text)" }}>No active campaigns yet</p>
         ) : (
           published.map((ad) => (
             <CampaignRow
               key={ad.id} ad={ad}
               expanded={expandedId === ad.id} onToggle={() => onToggle(ad.id)}
               publishing={publishing}
-              onPublish={onPublish} onPreviewAd={onPreviewAd} onViewDetail={onViewDetail}
+              onPublish={onPublish} onUpdateAd={onUpdateAd}
+              onPreviewAd={onPreviewAd} onViewDetail={onViewDetail}
               hostingId={hostingId} hostError={hostError} onHostPage={onHostPage}
             />
           ))
@@ -517,8 +621,23 @@ function OverviewTab({ approved, published, publishing, publishError, expandedId
   );
 }
 
-function CampaignRow({ ad, expanded, onToggle, publishing, onPublish, onPreviewAd, onViewDetail, hostingId, hostError, onHostPage }) {
-  const isLive = ad.status === "published";
+// ─── Campaign Row ──────────────────────────────────────────────────────────────
+function CampaignRow({ ad, expanded, onToggle, publishing, onPublish, onUpdateAd, onPreviewAd, onViewDetail }) {
+  const isLive     = ad.status === "published";
+  const checklist  = getDeployChecklist(ad);
+  const doneCount  = checklist.filter((i) => i.done).length;
+  const totalCount = checklist.length;
+  const allDone    = totalCount > 0 && doneCount === totalCount;
+
+  // Progress pill colour
+  const pillColor = isLive
+    ? { bg: "rgba(34,197,94,0.12)", text: "#15803d" }
+    : allDone
+      ? { bg: "rgba(34,197,94,0.12)", text: "#15803d" }
+      : doneCount === 0
+        ? { bg: "rgba(107,114,128,0.1)", text: "var(--color-sidebar-text)" }
+        : { bg: "rgba(234,179,8,0.12)", text: "#92400e" };
+
   return (
     <div>
       <div
@@ -527,14 +646,19 @@ function CampaignRow({ ad, expanded, onToggle, publishing, onPublish, onPreviewA
         onClick={onToggle}
       >
         <div className="flex items-center gap-3">
+          {/* Status dot */}
           <div className={isLive ? "pub-campaign-row__dot--live" : "pub-campaign-row__dot"} />
           <div>
             <p className="table-row__title">{ad.title}</p>
             <p className="table-row__meta">{typeLabel(ad)} · Budget: ${ad.budget != null ? Number(ad.budget).toLocaleString() : "N/A"}</p>
           </div>
         </div>
+
         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          {expanded ? <ChevronUp size={14} style={{ color: "var(--color-sidebar-text)" }} /> : <ChevronDown size={14} style={{ color: "var(--color-sidebar-text)" }} />}
+          {expanded
+            ? <ChevronUp  size={14} style={{ color: "var(--color-sidebar-text)" }} />
+            : <ChevronDown size={14} style={{ color: "var(--color-sidebar-text)" }} />}
+
           <button
             onClick={() => onViewDetail(ad.id)}
             style={{
@@ -546,34 +670,204 @@ function CampaignRow({ ad, expanded, onToggle, publishing, onPublish, onPreviewA
           >
             <Eye size={11} /> Details
           </button>
-          {!isLive ? (
-            <button onClick={() => onPublish(ad.id)} disabled={publishing === ad.id} className="btn--publish">
-              {publishing === ad.id
-                ? <><div className="spinner" style={{ width: 12, height: 12 }} /> Publishing…</>
-                : <><Send size={13} /> Publish</>}
-            </button>
-          ) : (
-            <CampaignStatusBadge status={ad.status} />
-          )}
+
+          {/* Deployment status pill (replaces old Publish button) */}
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 5,
+            padding: "4px 10px", borderRadius: 999, fontSize: "0.72rem", fontWeight: 700,
+            backgroundColor: pillColor.bg, color: pillColor.text,
+          }}>
+            {isLive
+              ? <><CheckCircle2 size={11} /> Active</>
+              : allDone
+                ? <><CheckCircle2 size={11} /> Ready</>
+                : <><span style={{ opacity: 0.7 }}>{doneCount}/{totalCount}</span> steps done</>}
+          </span>
         </div>
       </div>
+
+      {/* Expanded panel */}
       {expanded && (
-        <CampaignDetailPanel ad={ad} onPreviewAd={onPreviewAd} hostingId={hostingId} hostError={hostError} onHostPage={onHostPage} />
+        isLive
+          ? <PublishedCampaignPanel ad={ad} onPreviewAd={onPreviewAd} onUpdateAd={onUpdateAd} />
+          : <DeploymentChecklist
+              ad={ad}
+              checklist={checklist}
+              allDone={allDone}
+              publishing={publishing}
+              onPublish={onPublish}
+              onUpdateAd={onUpdateAd}
+              onPreviewAd={onPreviewAd}
+            />
       )}
     </div>
   );
 }
 
-function CampaignDetailPanel({ ad, onPreviewAd, hostingId, hostError, onHostPage }) {
+// ─── Deployment Checklist (shown for approved/unpublished campaigns) ──────────
+function DeploymentChecklist({ ad, checklist, allDone, publishing, onPublish, onUpdateAd, onPreviewAd }) {
+  const navigate  = useNavigate();
+  const [hosting, setHosting] = useState(false);
+  const isAds = hasType(ad, "ads");
+
+  const handleHostPage = async () => {
+    setHosting(true);
+    try {
+      const updated = await adsAPI.hostPage(ad.id);
+      onUpdateAd(updated);
+    } catch (err) { alert(err.message); }
+    finally { setHosting(false); }
+  };
+
+  return (
+    <div className="pub-campaign-detail">
+      <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-sidebar-text)", marginBottom: "14px" }}>
+        Deployment Checklist
+      </p>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
+        {checklist.map((item) => (
+          <div
+            key={item.key}
+            style={{
+              display: "flex", alignItems: "flex-start", gap: "12px",
+              padding: "12px 14px", borderRadius: "10px",
+              backgroundColor: item.done
+                ? "rgba(34,197,94,0.05)"
+                : "var(--color-page-bg)",
+              border: `1px solid ${item.done ? "rgba(34,197,94,0.2)" : "var(--color-card-border)"}`,
+            }}
+          >
+            {/* Icon */}
+            <div style={{ flexShrink: 0, marginTop: 1 }}>
+              {item.done
+                ? <CheckCircle2 size={16} style={{ color: "#22c55e" }} />
+                : <div style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid var(--color-card-border)", backgroundColor: "transparent" }} />}
+            </div>
+
+            {/* Content */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ fontSize: "0.83rem", fontWeight: 600, color: item.done ? "#15803d" : "var(--color-input-text)", marginBottom: 2 }}>
+                {item.label}
+              </p>
+              <p style={{ fontSize: "0.75rem", color: "var(--color-sidebar-text)" }}>{item.detail}</p>
+              {item.note && (
+                <p style={{ fontSize: "0.72rem", color: "var(--color-muted)", fontStyle: "italic", marginTop: 3 }}>{item.note}</p>
+              )}
+            </div>
+
+            {/* Action button */}
+            {item.action && !item.done && (
+              <div style={{ flexShrink: 0 }}>
+                {item.action.type === "navigate" && (
+                  <button
+                    onClick={() => navigate(item.action.path)}
+                    className="btn--inline-action--ghost"
+                    style={{ fontSize: "0.75rem", whiteSpace: "nowrap" }}
+                  >
+                    {item.action.label} <ChevronRight size={11} />
+                  </button>
+                )}
+                {item.action.type === "host" && (
+                  <button
+                    onClick={handleHostPage}
+                    disabled={hosting}
+                    className="btn--inline-action--ghost"
+                    style={{ fontSize: "0.75rem", whiteSpace: "nowrap" }}
+                  >
+                    {hosting
+                      ? <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} />
+                      : <Globe size={11} />}
+                    {hosting ? "Hosting…" : item.action.label}
+                  </button>
+                )}
+                {item.action.type === "disabled" && (
+                  <span style={{ fontSize: "0.72rem", color: "var(--color-muted)", fontStyle: "italic" }}>
+                    {item.action.label}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Optional: external platform deployment tip */}
+      {hasType(ad, "website") && ad.hosted_url && (
+        <div style={{ marginBottom: "16px", padding: "10px 14px", borderRadius: "8px", backgroundColor: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.04)", border: "1px solid rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.15)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <p style={{ fontSize: "0.75rem", color: "var(--color-sidebar-text)" }}>
+            <strong>Optional:</strong> Deploy to Vercel, Netlify, or a custom domain for a production URL.
+          </p>
+          <button onClick={() => navigate("/publisher/deploy")} className="btn--inline-action--ghost" style={{ fontSize: "0.75rem", flexShrink: 0 }}>
+            <UploadCloud size={11} /> Deploy Tab <ChevronRight size={11} />
+          </button>
+        </div>
+      )}
+
+      {/* Preview creatives if available */}
+      {isAds && ad.output_files?.length > 0 && (
+        <div style={{ marginBottom: "16px" }}>
+          <button className="btn--inline-action--accent" onClick={() => onPreviewAd(ad)}>
+            <Eye size={11} /> Preview Creatives
+          </button>
+        </div>
+      )}
+
+      {/* Activate when all done */}
+      {allDone && ad.status !== "published" && (
+        <div style={{ padding: "14px 16px", borderRadius: "10px", backgroundColor: "rgba(34,197,94,0.07)", border: "1px solid rgba(34,197,94,0.25)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <p style={{ fontSize: "0.85rem", fontWeight: 700, color: "#15803d" }}>All steps complete</p>
+            <p style={{ fontSize: "0.75rem", color: "#166534" }}>This campaign is ready to be marked as active.</p>
+          </div>
+          <button
+            onClick={() => onPublish(ad.id)}
+            disabled={publishing === ad.id}
+            className="btn--approve"
+            style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            {publishing === ad.id
+              ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />
+              : <Zap size={13} />}
+            {publishing === ad.id ? "Activating…" : "Activate Campaign"}
+          </button>
+        </div>
+      )}
+
+      {/* Voicebot config section (always shown if applicable) */}
+      {hasType(ad, "voicebot") && (
+        <div style={{ marginTop: "20px", borderTop: "1px solid var(--color-card-border)", paddingTop: "16px" }}>
+          <p className="pub-campaign-detail__section-label">Voice Agent Setup</p>
+          <VoicebotConfig ad={ad} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Published Campaign Panel (shown for active/published campaigns) ──────────
+function PublishedCampaignPanel({ ad, onPreviewAd, onUpdateAd }) {
+  const [hosting, setHosting] = useState(false);
+  const [hostErr, setHostErr] = useState(null);
+
+  const handleHostPage = async () => {
+    setHosting(true);
+    setHostErr(null);
+    try {
+      const updated = await adsAPI.hostPage(ad.id);
+      onUpdateAd(updated);
+    } catch (err) { setHostErr(err.message); }
+    finally { setHosting(false); }
+  };
+
   const isWebsite = hasType(ad, "website");
   const isAds     = hasType(ad, "ads");
 
   return (
     <div className="pub-campaign-detail">
-
       {isWebsite && (
         <div className="mb-4">
-          <p className="pub-campaign-detail__section-label">Generated Website</p>
+          <p className="pub-campaign-detail__section-label">Landing Page</p>
           {ad.output_url ? (
             <>
               <div className="flex gap-2" style={{ flexWrap: "wrap" }}>
@@ -584,17 +878,17 @@ function CampaignDetailPanel({ ad, onPreviewAd, hostingId, hostError, onHostPage
                   <Download size={11} /> Download HTML
                 </a>
                 <button
-                  onClick={() => onHostPage(ad.id)}
-                  disabled={hostingId === ad.id}
+                  onClick={handleHostPage}
+                  disabled={hosting}
                   className="btn--inline-action--ghost"
-                  style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: hostingId === ad.id ? "wait" : "pointer" }}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 5, cursor: hosting ? "wait" : "pointer" }}
                 >
                   <Globe size={11} />
-                  {hostingId === ad.id ? "Hosting…" : ad.hosted_url ? "Re-host" : "Host"}
+                  {hosting ? "Hosting…" : ad.hosted_url ? "Re-host" : "Host"}
                 </button>
               </div>
-              {hostError[ad.id] && (
-                <p style={{ fontSize: "0.75rem", color: "#ef4444", marginTop: 6 }}>{hostError[ad.id]}</p>
+              {hostErr && (
+                <p style={{ fontSize: "0.75rem", color: "#ef4444", marginTop: 6 }}>{hostErr}</p>
               )}
               {ad.hosted_url && (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, padding: "8px 12px", borderRadius: 8, backgroundColor: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.2)" }}>
@@ -609,29 +903,27 @@ function CampaignDetailPanel({ ad, onPreviewAd, hostingId, hostError, onHostPage
               )}
             </>
           ) : (
-            <p className="text-xs" style={{ color: "var(--color-sidebar-text)" }}>Website not yet generated</p>
+            <p className="text-xs" style={{ color: "var(--color-sidebar-text)" }}>No website generated</p>
           )}
         </div>
       )}
 
       {isAds && (
         <div className="mb-4">
-          <p className="pub-campaign-detail__section-label">Generated Creatives</p>
+          <p className="pub-campaign-detail__section-label">Ad Creatives</p>
           {ad.output_files?.length > 0 ? (
-            <div className="flex gap-2">
-              <button className="btn--inline-action--accent" onClick={() => onPreviewAd(ad)}>
-                <Eye size={11} /> Preview
-              </button>
-            </div>
+            <button className="btn--inline-action--accent" onClick={() => onPreviewAd(ad)}>
+              <Eye size={11} /> Preview ({ad.output_files.length})
+            </button>
           ) : (
-            <p className="text-xs" style={{ color: "var(--color-sidebar-text)" }}>Ad creatives not yet generated</p>
+            <p className="text-xs" style={{ color: "var(--color-sidebar-text)" }}>No creatives</p>
           )}
         </div>
       )}
 
       {hasType(ad, "voicebot") && (
         <div className="mb-2">
-          <p className="pub-campaign-detail__section-label">Voice Agent Setup</p>
+          <p className="pub-campaign-detail__section-label">Voice Agent</p>
           <VoicebotConfig ad={ad} />
         </div>
       )}
@@ -1942,73 +2234,673 @@ function aspectRatioForFormat(format = "") {
   return "16/9";
 }
 
+// ─── Manage Ads Tab ───────────────────────────────────────────────────────────
+function ManageTab({ ads, metaConnection }) {
+  // Campaigns that have been distributed to Meta
+  const metaCampaigns = ads.filter((a) => a.bot_config?.meta_campaign_id);
+
+  const [metaAds,       setMetaAds]       = useState({});   // { adId: { loading, ads, error } }
+  const [toggling,      setToggling]      = useState({});   // { metaAdId: true/false }
+  const [deleting,      setDeleting]      = useState({});
+  const [editTarget,    setEditTarget]    = useState(null); // { adId, metaAd }
+  const [editForm,      setEditForm]      = useState({});
+  const [editSaving,    setEditSaving]    = useState(false);
+  const [schedules,     setSchedules]     = useState({});   // { adId: { loading, data } }
+
+  const loadMetaAds = async (adId) => {
+    setMetaAds((p) => ({ ...p, [adId]: { loading: true, ads: [], error: null } }));
+    try {
+      const data = await adsAPI.listMetaAds(adId);
+      setMetaAds((p) => ({ ...p, [adId]: { loading: false, ads: data.ads || [], error: null } }));
+    } catch (err) {
+      setMetaAds((p) => ({ ...p, [adId]: { loading: false, ads: [], error: err.message } }));
+    }
+  };
+
+  const handleToggle = async (adId, metaAdId, currentStatus) => {
+    const newStatus = currentStatus === "ACTIVE" ? "PAUSED" : "ACTIVE";
+    setToggling((p) => ({ ...p, [metaAdId]: true }));
+    try {
+      await adsAPI.updateMetaAd(adId, metaAdId, { status: newStatus });
+      setMetaAds((p) => ({
+        ...p,
+        [adId]: {
+          ...p[adId],
+          ads: p[adId].ads.map((a) => a.id === metaAdId ? { ...a, status: newStatus } : a),
+        },
+      }));
+    } catch (err) { alert(err.message); }
+    finally { setToggling((p) => ({ ...p, [metaAdId]: false })); }
+  };
+
+  const handleDelete = async (adId, metaAdId) => {
+    if (!window.confirm("Permanently delete this ad from Meta? This cannot be undone.")) return;
+    setDeleting((p) => ({ ...p, [metaAdId]: true }));
+    try {
+      await adsAPI.deleteMetaAd(adId, metaAdId);
+      setMetaAds((p) => ({
+        ...p,
+        [adId]: { ...p[adId], ads: p[adId].ads.filter((a) => a.id !== metaAdId) },
+      }));
+    } catch (err) { alert(err.message); }
+    finally { setDeleting((p) => ({ ...p, [metaAdId]: false })); }
+  };
+
+  const openEdit = (adId, metaAd) => {
+    const ld = metaAd.creative?.object_story_spec?.link_data || {};
+    setEditTarget({ adId, metaAd });
+    setEditForm({
+      headline:   ld.name || "",
+      body:       ld.message || "",
+      cta_type:   ld.call_to_action?.type || "LEARN_MORE",
+      link_url:   ld.link || "",
+      image_hash: metaAd.creative?.image_hash || "",
+    });
+  };
+
+  const handleEditSave = async () => {
+    if (!editTarget) return;
+    setEditSaving(true);
+    try {
+      await adsAPI.updateMetaAd(editTarget.adId, editTarget.metaAd.id, editForm);
+      // Reload the ad list to reflect creative changes
+      await loadMetaAds(editTarget.adId);
+      setEditTarget(null);
+    } catch (err) { alert(err.message); }
+    finally { setEditSaving(false); }
+  };
+
+  const loadSchedule = async (adId) => {
+    setSchedules((p) => ({ ...p, [adId]: { loading: true, data: null } }));
+    try {
+      const result = await adsAPI.getScheduleSuggestions(adId);
+      setSchedules((p) => ({ ...p, [adId]: { loading: false, data: result.suggestions } }));
+    } catch (err) {
+      setSchedules((p) => ({ ...p, [adId]: { loading: false, data: null, error: err.message } }));
+    }
+  };
+
+  const inputStyle = {
+    width: "100%", padding: "8px 12px", borderRadius: "8px", fontSize: "0.83rem",
+    border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-input-bg)",
+    color: "var(--color-input-text)", outline: "none", fontFamily: "inherit",
+  };
+
+  if (!metaConnection) {
+    return (
+      <SectionCard title="Manage Meta Ads" subtitle="Connect your Meta account first">
+        <div className="flex flex-col items-center py-12 gap-3">
+          <Link2Off size={36} style={{ color: "var(--color-sidebar-text)", opacity: 0.4 }} />
+          <p className="text-sm" style={{ color: "var(--color-sidebar-text)" }}>
+            Connect your Meta account in Platform Settings to manage ads here.
+          </p>
+        </div>
+      </SectionCard>
+    );
+  }
+
+  if (metaCampaigns.length === 0) {
+    return (
+      <SectionCard title="Manage Meta Ads" subtitle="No campaigns distributed to Meta yet">
+        <div className="flex flex-col items-center py-12 gap-3">
+          <TrendingUp size={36} style={{ color: "var(--color-sidebar-text)", opacity: 0.4 }} />
+          <p className="text-sm" style={{ color: "var(--color-sidebar-text)" }}>
+            Distribute a campaign to Meta from the Distribute tab to manage its ads here.
+          </p>
+        </div>
+      </SectionCard>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {metaCampaigns.map((ad) => {
+        const state = metaAds[ad.id];
+        const sched = schedules[ad.id];
+        const campaignId = ad.bot_config?.meta_campaign_id;
+
+        return (
+          <SectionCard
+            key={ad.id}
+            title={ad.title}
+            subtitle={`Campaign ID: ${campaignId} · ${state?.ads?.length ?? "–"} ads`}
+          >
+            {/* Action bar */}
+            <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
+              <button
+                className="btn--inline-action--ghost"
+                onClick={() => loadMetaAds(ad.id)}
+                disabled={state?.loading}
+              >
+                {state?.loading
+                  ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />
+                  : <RefreshCw size={12} />}
+                {state ? "Refresh Ads" : "Load Ads"}
+              </button>
+              <button
+                className="btn--inline-action--ghost"
+                onClick={() => loadSchedule(ad.id)}
+                disabled={sched?.loading}
+              >
+                {sched?.loading
+                  ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />
+                  : <Clock size={12} />}
+                AI Schedule Suggestions
+              </button>
+              <a
+                href={ad.bot_config?.meta_manager_url}
+                target="_blank"
+                rel="noreferrer"
+                className="btn--inline-action--ghost"
+                style={{ fontSize: "0.78rem", display: "inline-flex", alignItems: "center", gap: 5 }}
+              >
+                <ExternalLink size={12} /> Ads Manager
+              </a>
+            </div>
+
+            {/* Error */}
+            {state?.error && (
+              <div style={{ padding: "8px 12px", borderRadius: "8px", backgroundColor: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.22)", marginBottom: "12px" }}>
+                <p style={{ fontSize: "0.78rem", color: "#ef4444" }}>{state.error}</p>
+              </div>
+            )}
+
+            {/* Ad table */}
+            {state?.ads?.length > 0 && (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--color-card-border)" }}>
+                      {["Creative", "Headline", "Status", "Enable/Pause", "Edit", "Delete"].map((h) => (
+                        <th key={h} style={{ padding: "6px 10px", textAlign: "left", fontWeight: 600, color: "var(--color-sidebar-text)", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {state.ads.map((metaAd) => {
+                      const ld  = metaAd.creative?.object_story_spec?.link_data || {};
+                      const isActive  = metaAd.status === "ACTIVE";
+                      const isToggling = toggling[metaAd.id];
+                      const isDeleting = deleting[metaAd.id];
+
+                      return (
+                        <tr key={metaAd.id} style={{ borderBottom: "1px solid var(--color-card-border)" }}>
+                          {/* Creative thumbnail */}
+                          <td style={{ padding: "8px 10px" }}>
+                            <div style={{ width: 48, height: 36, borderRadius: 6, overflow: "hidden", border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)" }}>
+                              <Image size={18} style={{ margin: "9px auto", display: "block", color: "var(--color-sidebar-text)", opacity: 0.3 }} />
+                            </div>
+                          </td>
+
+                          {/* Headline + body */}
+                          <td style={{ padding: "8px 10px", maxWidth: 220 }}>
+                            <p style={{ fontWeight: 600, color: "var(--color-input-text)", marginBottom: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {ld.name || metaAd.name}
+                            </p>
+                            <p style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 200 }}>
+                              {ld.message || "—"}
+                            </p>
+                          </td>
+
+                          {/* Status badge */}
+                          <td style={{ padding: "8px 10px" }}>
+                            <span style={{
+                              display: "inline-flex", alignItems: "center", gap: 4,
+                              fontSize: "0.7rem", fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                              backgroundColor: isActive ? "rgba(34,197,94,0.1)" : "rgba(234,179,8,0.1)",
+                              color: isActive ? "#16a34a" : "#92400e",
+                            }}>
+                              {isActive ? <Play size={9} /> : <Pause size={9} />}
+                              {metaAd.status}
+                            </span>
+                          </td>
+
+                          {/* Toggle */}
+                          <td style={{ padding: "8px 10px" }}>
+                            <button
+                              onClick={() => handleToggle(ad.id, metaAd.id, metaAd.status)}
+                              disabled={isToggling}
+                              title={isActive ? "Pause ad" : "Activate ad"}
+                              style={{
+                                background: "none", border: "none", cursor: "pointer",
+                                color: isActive ? "#ca8a04" : "#16a34a", padding: 4,
+                              }}
+                            >
+                              {isToggling
+                                ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} />
+                                : isActive ? <ToggleRight size={22} /> : <ToggleLeft size={22} />
+                              }
+                            </button>
+                          </td>
+
+                          {/* Edit */}
+                          <td style={{ padding: "8px 10px" }}>
+                            <button
+                              onClick={() => openEdit(ad.id, metaAd)}
+                              title="Edit headline / body"
+                              className="btn--icon"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                          </td>
+
+                          {/* Delete */}
+                          <td style={{ padding: "8px 10px" }}>
+                            <button
+                              onClick={() => handleDelete(ad.id, metaAd.id)}
+                              disabled={isDeleting}
+                              title="Delete this ad"
+                              className="btn--icon"
+                              style={{ color: "#ef4444" }}
+                            >
+                              {isDeleting
+                                ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+                                : <Trash2 size={14} />
+                              }
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Schedule suggestions panel */}
+            {sched?.data && (
+              <div style={{ marginTop: "16px", padding: "16px", borderRadius: "10px", backgroundColor: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.05)", border: "1px solid rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.2)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
+                  <Sparkles size={14} style={{ color: "var(--color-accent)" }} />
+                  <p style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--color-input-text)" }}>AI Schedule Recommendations</p>
+                  <span style={{ fontSize: "0.65rem", padding: "1px 7px", borderRadius: 999, backgroundColor: sched.data.confidence === "high" ? "rgba(34,197,94,0.15)" : "rgba(234,179,8,0.15)", color: sched.data.confidence === "high" ? "#15803d" : "#92400e", fontWeight: 700 }}>
+                    {sched.data.confidence?.toUpperCase()} confidence
+                  </span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "12px", marginBottom: 12 }}>
+                  <div>
+                    <p style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Best Days</p>
+                    <p style={{ fontSize: "0.82rem", color: "var(--color-input-text)" }}>{sched.data.best_days?.join(", ")}</p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Best Hours</p>
+                    <p style={{ fontSize: "0.82rem", color: "var(--color-input-text)" }}>{sched.data.best_hours?.join(", ")}</p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Pause Periods</p>
+                    <p style={{ fontSize: "0.82rem", color: "var(--color-input-text)" }}>{sched.data.pause_periods?.join(", ")}</p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Budget Pacing</p>
+                    <p style={{ fontSize: "0.82rem", color: "var(--color-input-text)" }}>{sched.data.budget_pacing}</p>
+                  </div>
+                </div>
+                {sched.data.headline_tips?.length > 0 && (
+                  <div style={{ marginBottom: 10 }}>
+                    <p style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Caption Tips</p>
+                    <ul style={{ paddingLeft: 16, margin: 0 }}>
+                      {sched.data.headline_tips.map((tip, i) => (
+                        <li key={i} style={{ fontSize: "0.8rem", color: "var(--color-input-text)", marginBottom: 2 }}>{tip}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)", fontStyle: "italic" }}>{sched.data.reasoning}</p>
+              </div>
+            )}
+          </SectionCard>
+        );
+      })}
+
+      {/* Edit creative modal */}
+      {editTarget && (
+        <div className="ad-preview-overlay" onClick={() => setEditTarget(null)}>
+          <div className="ad-preview-modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+            <div className="ad-preview-modal__header">
+              <div>
+                <h3 className="page-card__title">Edit Ad Creative</h3>
+                <p className="page-card__subtitle">{editTarget.metaAd.name}</p>
+              </div>
+              <button className="btn--icon" onClick={() => setEditTarget(null)}><X size={16} /></button>
+            </div>
+            <div style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "14px" }}>
+              <div style={{ padding: "10px 12px", borderRadius: "8px", backgroundColor: "rgba(234,179,8,0.07)", border: "1px solid rgba(234,179,8,0.25)" }}>
+                <p style={{ fontSize: "0.76rem", color: "#92400e" }}>
+                  Editing creates a new Meta creative and assigns it to this ad. The original creative is kept on Meta but deactivated on this ad.
+                </p>
+              </div>
+              {[
+                { key: "headline", label: "Headline", multiline: false },
+                { key: "body",     label: "Caption / Body (include #hashtags here)", multiline: true },
+                { key: "link_url", label: "Destination URL", multiline: false },
+              ].map(({ key, label, multiline }) => (
+                <div key={key}>
+                  <label style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--color-sidebar-text)", display: "block", marginBottom: 5 }}>{label}</label>
+                  {multiline ? (
+                    <textarea
+                      rows={3}
+                      style={{ ...inputStyle, resize: "vertical" }}
+                      value={editForm[key] || ""}
+                      onChange={(e) => setEditForm((p) => ({ ...p, [key]: e.target.value }))}
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      style={inputStyle}
+                      value={editForm[key] || ""}
+                      onChange={(e) => setEditForm((p) => ({ ...p, [key]: e.target.value }))}
+                    />
+                  )}
+                </div>
+              ))}
+              <div>
+                <label style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--color-sidebar-text)", display: "block", marginBottom: 5 }}>CTA Type</label>
+                <select
+                  style={inputStyle}
+                  value={editForm.cta_type || "LEARN_MORE"}
+                  onChange={(e) => setEditForm((p) => ({ ...p, cta_type: e.target.value }))}
+                >
+                  {["LEARN_MORE","SIGN_UP","CONTACT_US","GET_STARTED","APPLY_NOW","BOOK_NOW"].map((c) => (
+                    <option key={c} value={c}>{c.replace(/_/g, " ")}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+                <button
+                  onClick={handleEditSave}
+                  disabled={editSaving}
+                  className="btn--accent"
+                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                >
+                  {editSaving ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <CheckCircle2 size={14} />}
+                  {editSaving ? "Saving to Meta…" : "Save Changes"}
+                </button>
+                <button onClick={() => setEditTarget(null)} className="btn--ghost" style={{ flex: 1 }}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Publisher Analytics Sub-component ───────────────────────────────────────
 function PublisherAnalytics({ ads }) {
-  const [selected,    setSelected]    = useState(null);
-  const [suggestions, setSuggestions] = useState(null);
-  const [optimizing,  setOptimizing]  = useState(false);
+  const [selectedAd,   setSelectedAd]   = useState(null);
+  const [datePreset,   setDatePreset]   = useState("last_30d");
+  const [insights,     setInsights]     = useState(null);   // { rows: [...] }
+  const [syncing,      setSyncing]      = useState(false);
+  const [suggestions,  setSuggestions]  = useState(null);
+  const [optimizing,   setOptimizing]   = useState(false);
 
-  const handleOptimize = async (adId) => {
+  const activeAd = selectedAd || ads[0] || null;
+
+  useEffect(() => {
+    if (activeAd) setInsights(null);
+  }, [activeAd?.id]);
+
+  const handleSyncInsights = async () => {
+    if (!activeAd) return;
+    setSyncing(true);
+    try {
+      const data = await adsAPI.fetchMetaInsights(activeAd.id, datePreset);
+      setInsights(data);
+    } catch (err) { alert(err.message); }
+    finally { setSyncing(false); }
+  };
+
+  const handleOptimize = async () => {
+    if (!activeAd) return;
     setOptimizing(true);
     try {
-      const result = await analyticsAPI.triggerOptimize(adId);
+      const result = await analyticsAPI.triggerOptimize(activeAd.id);
       setSuggestions(result);
     } catch (err) { alert(err.message); }
     finally { setOptimizing(false); }
   };
 
-  const handleDecision = async (adId, decision) => {
+  const handleDecision = async (decision) => {
+    if (!activeAd) return;
     try {
-      await analyticsAPI.submitDecision(adId, { decision });
+      await analyticsAPI.submitDecision(activeAd.id, { decision });
       setSuggestions(null);
-      alert(`Decision "${decision}" recorded. Reinforcement learning updated.`);
+      alert(`Decision "${decision}" recorded.`);
     } catch (err) { alert(err.message); }
   };
 
+  // Derived totals from insights rows
+  const totals = (insights?.rows || []).reduce(
+    (acc, r) => ({
+      impressions: acc.impressions + (r.impressions || 0),
+      clicks:      acc.clicks      + (r.clicks      || 0),
+      spend:       acc.spend       + (r.spend        || 0),
+      reach:       acc.reach       + (r.reach        || 0),
+      conversions: acc.conversions + (r.conversions  || 0),
+    }),
+    { impressions: 0, clicks: 0, spend: 0, reach: 0, conversions: 0 }
+  );
+  const avgCtr  = totals.impressions ? ((totals.clicks / totals.impressions) * 100).toFixed(2) : "–";
+  const avgCpm  = totals.impressions ? ((totals.spend / totals.impressions) * 1000).toFixed(2) : "–";
+
+  // KPIs from strategy
+  const strategyKpis = (activeAd?.strategy_json?.kpis || []);
+
+  // Map strategy KPI metric names to computed actuals
+  const kpiActualMap = {
+    "CTR":             avgCtr !== "–" ? `${avgCtr}%` : null,
+    "Impressions":     totals.impressions > 0 ? totals.impressions.toLocaleString() : null,
+    "Conversions":     totals.conversions > 0 ? totals.conversions.toLocaleString() : null,
+    "Spend":           totals.spend > 0 ? `$${totals.spend.toFixed(2)}` : null,
+    "CPC":             totals.clicks && totals.spend ? `$${(totals.spend / totals.clicks).toFixed(2)}` : null,
+    "Conversion Rate": totals.clicks && totals.conversions ? `${((totals.conversions / totals.clicks) * 100).toFixed(1)}%` : null,
+  };
+
+  const chartData = (insights?.rows || []).map((r) => ({
+    date:        r.date?.slice(5),   // "MM-DD"
+    Impressions: r.impressions || 0,
+    Clicks:      r.clicks      || 0,
+    Spend:       parseFloat((r.spend || 0).toFixed(2)),
+  }));
+
+  const DATE_PRESETS = [
+    { value: "last_7d",   label: "Last 7 days" },
+    { value: "last_14d",  label: "Last 14 days" },
+    { value: "last_30d",  label: "Last 30 days" },
+    { value: "last_90d",  label: "Last 90 days" },
+  ];
+
+  if (ads.length === 0) {
+    return (
+      <SectionCard title="Campaign Analytics" subtitle="No published campaigns yet">
+        <div className="flex flex-col items-center py-12 gap-3">
+          <BarChart3 size={36} style={{ color: "var(--color-sidebar-text)", opacity: 0.4 }} />
+          <p className="text-sm" style={{ color: "var(--color-sidebar-text)" }}>Publish a campaign to view analytics here</p>
+        </div>
+      </SectionCard>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      <SectionCard title="Published Campaign Analytics" subtitle="View performance and apply optimizer suggestions">
-        {ads.length === 0 ? (
-          <p className="text-sm py-4" style={{ color: "var(--color-sidebar-text)" }}>No published campaigns to analyze yet</p>
-        ) : (
-          ads.map((ad) => (
-            <div key={ad.id} className="pub-campaign-row">
-              <div className="flex items-center gap-3">
-                <div className="pub-campaign-row__dot--live" />
-                <div>
-                  <p className="table-row__title">{ad.title}</p>
-                  <p className="table-row__meta">{typeLabel(ad)}</p>
-                </div>
-              </div>
+      {/* Campaign selector + date picker */}
+      <SectionCard title="Campaign Analytics" subtitle="Live performance data from Meta · Sync to populate charts">
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", marginBottom: "16px" }}>
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            {ads.map((ad) => (
               <button
-                onClick={() => { setSelected(ad); handleOptimize(ad.id); }}
-                className="btn--optimize"
+                key={ad.id}
+                onClick={() => setSelectedAd(ad)}
+                className={activeAd?.id === ad.id ? "filter-tab--active" : "filter-tab"}
+                style={{ fontSize: "0.78rem" }}
               >
-                <Sparkles size={12} /> {optimizing && selected?.id === ad.id ? "Optimizing…" : "Optimize"}
+                {ad.title}
               </button>
+            ))}
+          </div>
+          <select
+            value={datePreset}
+            onChange={(e) => setDatePreset(e.target.value)}
+            style={{ padding: "5px 10px", borderRadius: "8px", fontSize: "0.8rem", border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-input-bg)", color: "var(--color-input-text)", cursor: "pointer" }}
+          >
+            {DATE_PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
+          <button
+            onClick={handleSyncInsights}
+            disabled={syncing || !activeAd?.bot_config?.meta_campaign_id}
+            className="btn--inline-action--ghost"
+            style={{ fontSize: "0.8rem" }}
+          >
+            {syncing
+              ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />
+              : <RefreshCw size={12} />}
+            Sync from Meta
+          </button>
+          {!activeAd?.bot_config?.meta_campaign_id && (
+            <span style={{ fontSize: "0.72rem", color: "var(--color-muted)" }}>Distribute to Meta first to fetch live data</span>
+          )}
+        </div>
+
+        {/* KPI summary cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: "10px", marginBottom: "20px" }}>
+          {[
+            { label: "Impressions", value: totals.impressions.toLocaleString() || "–" },
+            { label: "Clicks",      value: totals.clicks.toLocaleString()       || "–" },
+            { label: "CTR",         value: avgCtr !== "–" ? `${avgCtr}%` : "–" },
+            { label: "Spend (USD)", value: totals.spend > 0 ? `$${totals.spend.toFixed(2)}` : "–" },
+            { label: "Reach",       value: totals.reach > 0 ? totals.reach.toLocaleString() : "–" },
+            { label: "CPM",         value: avgCpm !== "–" ? `$${avgCpm}` : "–" },
+          ].map(({ label, value }) => (
+            <div key={label} style={{ padding: "12px 14px", borderRadius: "10px", border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)" }}>
+              <p style={{ fontSize: "0.68rem", fontWeight: 600, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</p>
+              <p style={{ fontSize: "1.2rem", fontWeight: 700, color: "var(--color-input-text)" }}>{insights ? value : <span style={{ color: "var(--color-muted)", fontSize: "0.9rem" }}>sync to view</span>}</p>
             </div>
-          ))
+          ))}
+        </div>
+
+        {/* Impressions + Clicks line chart */}
+        {chartData.length > 0 && (
+          <div style={{ marginBottom: "24px" }}>
+            <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-sidebar-text)", marginBottom: "8px" }}>
+              Impressions &amp; Clicks — Daily
+            </p>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={chartData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-card-border)" />
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: "var(--color-sidebar-text)" }} />
+                <YAxis yAxisId="left"  tick={{ fontSize: 10, fill: "var(--color-sidebar-text)" }} />
+                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: "var(--color-sidebar-text)" }} />
+                <Tooltip contentStyle={{ backgroundColor: "var(--color-card-bg)", border: "1px solid var(--color-card-border)", borderRadius: 8, fontSize: "0.78rem" }} />
+                <Legend wrapperStyle={{ fontSize: "0.75rem" }} />
+                <Line yAxisId="left"  type="monotone" dataKey="Impressions" stroke="#6366f1" strokeWidth={2} dot={false} />
+                <Line yAxisId="right" type="monotone" dataKey="Clicks"      stroke="#22c55e" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* Daily spend bar chart */}
+        {chartData.length > 0 && (
+          <div style={{ marginBottom: "8px" }}>
+            <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-sidebar-text)", marginBottom: "8px" }}>
+              Daily Spend (USD)
+            </p>
+            <ResponsiveContainer width="100%" height={150}>
+              <BarChart data={chartData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-card-border)" />
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: "var(--color-sidebar-text)" }} />
+                <YAxis tick={{ fontSize: 10, fill: "var(--color-sidebar-text)" }} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: "var(--color-card-bg)", border: "1px solid var(--color-card-border)", borderRadius: 8, fontSize: "0.78rem" }}
+                  formatter={(v) => [`$${v}`, "Spend"]}
+                />
+                <Bar dataKey="Spend" fill="rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.7)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {!insights && (
+          <div style={{ textAlign: "center", padding: "32px 0", color: "var(--color-sidebar-text)", fontSize: "0.83rem" }}>
+            Click <strong>Sync from Meta</strong> to load live performance data and populate charts.
+          </div>
         )}
       </SectionCard>
 
-      {suggestions && selected && (
-        <SectionCard title={`Optimizer Suggestions: ${selected.title}`}>
-          <div className="code-preview--highlight mb-4">
-            <pre>{JSON.stringify(suggestions.suggestions, null, 2)}</pre>
-          </div>
-          <div className="flex gap-3">
-            <button onClick={() => handleDecision(selected.id, "accepted")} className="btn--approve">
-              <CheckCircle size={16} /> Accept & Redeploy
-            </button>
-            <button onClick={() => handleDecision(selected.id, "partial")} className="btn--revise">
-              Partial Accept
-            </button>
-            <button onClick={() => handleDecision(selected.id, "rejected")} className="btn--ghost flex-1 py-2.5">
-              Reject
-            </button>
+      {/* Strategy KPIs — Target vs Achieved */}
+      {strategyKpis.length > 0 && (
+        <SectionCard
+          title="Strategy KPI Targets vs Achieved"
+          subtitle="Targets set during strategy creation · Actuals from Meta data (sync required)"
+        >
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "10px" }}>
+            {strategyKpis.map((kpi, i) => {
+              const achieved = kpiActualMap[kpi.metric] || null;
+              return (
+                <div key={i} style={{ padding: "14px 16px", borderRadius: "10px", border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                    <p style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--color-input-text)" }}>{kpi.metric}</p>
+                    <span style={{ fontSize: "0.62rem", padding: "1px 7px", borderRadius: 999, backgroundColor: achieved ? "rgba(34,197,94,0.1)" : "rgba(107,114,128,0.1)", color: achieved ? "#15803d" : "var(--color-muted)", fontWeight: 600 }}>
+                      {achieved ? "TRACKED" : "PENDING SYNC"}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: "12px" }}>
+                    <div>
+                      <p style={{ fontSize: "0.62rem", fontWeight: 600, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 2 }}>Target</p>
+                      <p style={{ fontSize: "1rem", fontWeight: 700, color: "var(--color-accent)" }}>{kpi.target}</p>
+                    </div>
+                    <div style={{ borderLeft: "1px solid var(--color-card-border)", paddingLeft: 12 }}>
+                      <p style={{ fontSize: "0.62rem", fontWeight: 600, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 2 }}>Achieved</p>
+                      <p style={{ fontSize: "1rem", fontWeight: 700, color: achieved ? "var(--color-input-text)" : "var(--color-muted)" }}>
+                        {achieved || "–"}
+                      </p>
+                    </div>
+                  </div>
+                  {kpi.context && (
+                    <p style={{ fontSize: "0.68rem", color: "var(--color-sidebar-text)", marginTop: 6, fontStyle: "italic" }}>{kpi.context}</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </SectionCard>
       )}
+
+      {/* Optimizer */}
+      <SectionCard title="AI Optimizer" subtitle="Get suggestions to improve underperforming campaigns">
+        <div className="pub-campaign-row" style={{ marginBottom: suggestions ? 16 : 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div className="pub-campaign-row__dot--live" />
+            <div>
+              <p className="table-row__title">{activeAd?.title}</p>
+              <p className="table-row__meta">{typeLabel(activeAd)}</p>
+            </div>
+          </div>
+          <button onClick={handleOptimize} disabled={optimizing} className="btn--optimize">
+            {optimizing
+              ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />
+              : <Sparkles size={12} />}
+            {optimizing ? "Analyzing…" : "Optimize"}
+          </button>
+        </div>
+
+        {suggestions && (
+          <>
+            <div className="code-preview--highlight mb-4">
+              <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "0.78rem" }}>
+                {JSON.stringify(suggestions.suggestions, null, 2)}
+              </pre>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => handleDecision("accepted")} className="btn--approve">
+                <CheckCircle size={14} /> Accept &amp; Redeploy
+              </button>
+              <button onClick={() => handleDecision("partial")} className="btn--revise">Partial Accept</button>
+              <button onClick={() => handleDecision("rejected")} className="btn--ghost flex-1 py-2.5">Reject</button>
+            </div>
+          </>
+        )}
+      </SectionCard>
     </div>
   );
 }

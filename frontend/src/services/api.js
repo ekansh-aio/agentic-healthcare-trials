@@ -494,12 +494,29 @@ export const adsAPI = {
   getVoiceSessionToken: (adId) =>
     request(`/advertisements/${adId}/voice-session/token`),
 
-  // Trigger an outbound phone call to the given number via ElevenLabs/Twilio.
-  requestVoiceCall: (adId, phone) =>
-    request(`/advertisements/${adId}/voice-call/request`, {
-      method: "POST",
-      body: JSON.stringify({ phone }),
+  // ── Meta Ad Management ────────────────────────────────────────────────────
+  // List live ads for a campaign (fetched from Meta API)
+  listMetaAds: (adId) =>
+    request(`/advertisements/${adId}/meta-ads`),
+
+  // Toggle ACTIVE/PAUSED or update creative copy
+  updateMetaAd: (adId, metaAdId, data) =>
+    request(`/advertisements/${adId}/meta-ads/${metaAdId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
     }),
+
+  // Delete a Meta ad
+  deleteMetaAd: (adId, metaAdId) =>
+    request(`/advertisements/${adId}/meta-ads/${metaAdId}`, { method: "DELETE" }),
+
+  // Fetch insights from Meta and persist in AdAnalytics
+  fetchMetaInsights: (adId, datePreset = "last_30d") =>
+    request(`/advertisements/${adId}/meta-insights?date_preset=${datePreset}`),
+
+  // AI-generated schedule suggestions
+  getScheduleSuggestions: (adId) =>
+    request(`/advertisements/${adId}/schedule-suggestions`),
 };
 
 // ─── Platform Connections (Meta OAuth) ───────────────────────────────────────

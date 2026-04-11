@@ -112,6 +112,12 @@ async def init_db():
                 "ALTER TABLE platform_connections ADD COLUMN meta_user_id VARCHAR(128);",
                 "ALTER TABLE platform_connections ADD COLUMN ad_account_name VARCHAR(256);",
                 "ALTER TABLE platform_connections ADD COLUMN page_name VARCHAR(256);",
+                # ad_analytics: Meta-sourced insight columns
+                "ALTER TABLE ad_analytics ADD COLUMN spend REAL;",
+                "ALTER TABLE ad_analytics ADD COLUMN reach INTEGER;",
+                "ALTER TABLE ad_analytics ADD COLUMN cpm REAL;",
+                "ALTER TABLE ad_analytics ADD COLUMN date_label VARCHAR(32);",
+                "ALTER TABLE ad_analytics ADD COLUMN source VARCHAR(16) DEFAULT 'local';",
             ]
             for stmt in _sqlite_cols:
                 try:
@@ -166,6 +172,16 @@ async def init_db():
             "ALTER TABLE platform_connections ADD COLUMN IF NOT EXISTS ad_account_name VARCHAR(256);")
         await _add_column_if_missing(conn,
             "ALTER TABLE platform_connections ADD COLUMN IF NOT EXISTS page_name VARCHAR(256);")
+        await _add_column_if_missing(conn,
+            "ALTER TABLE ad_analytics ADD COLUMN IF NOT EXISTS spend FLOAT;")
+        await _add_column_if_missing(conn,
+            "ALTER TABLE ad_analytics ADD COLUMN IF NOT EXISTS reach INTEGER;")
+        await _add_column_if_missing(conn,
+            "ALTER TABLE ad_analytics ADD COLUMN IF NOT EXISTS cpm FLOAT;")
+        await _add_column_if_missing(conn,
+            "ALTER TABLE ad_analytics ADD COLUMN IF NOT EXISTS date_label VARCHAR(32);")
+        await _add_column_if_missing(conn,
+            "ALTER TABLE ad_analytics ADD COLUMN IF NOT EXISTS source VARCHAR(16) DEFAULT 'local';")
 
         # chat_sessions.campaign_id — added after initial table creation.
         await _run_migration(conn,

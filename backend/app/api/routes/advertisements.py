@@ -801,6 +801,419 @@ async def generate_creatives(
     return ad
 
 
+# ─── Meta Ad Management ───────────────────────────────────────────────────────
+
+def _get_meta_conn_and_ids(ad, conn):
+    """
+    Extract Meta campaign_id, ad_ids, access_token, ad_account_id, page_id from an ad.
+    Raises HTTPException if anything required is missing.
+    """
+    bot = ad.bot_config or {}
+    campaign_id = bot.get("meta_campaign_id")
+    ad_ids = bot.get("meta_ad_ids", [])
+
+    if not campaign_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No Meta campaign found for this advertisement. Distribute it to Meta first.",
+        )
+    if not conn:
+        raise HTTPException(
+            status_code=400,
+            detail="Meta account not connected. Connect it in Platform Settings.",
+        )
+    if not conn.ad_account_id or not conn.page_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Select an Ad Account and Facebook Page in Platform Settings.",
+        )
+    return campaign_id, ad_ids, conn.access_token, conn.ad_account_id, conn.page_id
+
+
+@router.get("/{ad_id}/meta-ads")
+async def list_meta_ads(
+    ad_id: str,
+    user: User = Depends(require_roles([UserRole.PUBLISHER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    List all Meta ads for this campaign, fetched live from the Meta API.
+    Returns id, name, status (ACTIVE/PAUSED/DELETED), and creative details (headline, body, image_hash, link).
+    """
+    from app.services.meta_ads_service import MetaAdsService
+    from app.models.models import PlatformConnection
+
+    ad_result = await db.execute(
+        select(Advertisement).where(
+            Advertisement.id == ad_id,
+            Advertisement.company_id == user.company_id,
+        )
+    )
+    ad = ad_result.scalar_one_or_none()
+    if not ad:
+        raise HTTPException(status_code=404, detail="Advertisement not found")
+
+    conn_result = await db.execute(
+        select(PlatformConnection).where(
+            PlatformConnection.company_id == user.company_id,
+            PlatformConnection.platform == "meta",
+        )
+    )
+    conn = conn_result.scalar_one_or_none()
+    campaign_id, _, access_token, ad_account_id, _ = _get_meta_conn_and_ids(ad, conn)
+
+    svc = MetaAdsService(access_token=access_token, ad_account_id=ad_account_id)
+    try:
+        ads = await svc.get_ads(campaign_id)
+    except Exception as exc:
+        logger.error("Meta get_ads failed for ad %s: %s", ad_id, exc, exc_info=True)
+        raise HTTPException(status_code=502, detail=str(exc))
+    finally:
+        await svc.close()
+
+    return {
+        "campaign_id": campaign_id,
+        "adset_id": (ad.bot_config or {}).get("meta_adset_id"),
+        "ads": ads,
+    }
+
+
+@router.patch("/{ad_id}/meta-ads/{meta_ad_id}")
+async def update_meta_ad(
+    ad_id: str,
+    meta_ad_id: str,
+    body: dict,
+    user: User = Depends(require_roles([UserRole.PUBLISHER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Update a Meta ad.
+
+    To toggle status:
+      {"status": "ACTIVE" | "PAUSED"}
+
+    To update creative copy (all fields required when editing creative):
+      {"headline": "...", "body": "...", "cta_type": "LEARN_MORE",
+       "link_url": "https://...", "image_hash": "...", "page_id": "..."}
+
+    page_id and image_hash are returned by GET /meta-ads and do not need to be re-fetched manually.
+    """
+    from app.services.meta_ads_service import MetaAdsService
+    from app.models.models import PlatformConnection
+
+    ad_result = await db.execute(
+        select(Advertisement).where(
+            Advertisement.id == ad_id,
+            Advertisement.company_id == user.company_id,
+        )
+    )
+    ad = ad_result.scalar_one_or_none()
+    if not ad:
+        raise HTTPException(status_code=404, detail="Advertisement not found")
+
+    conn_result = await db.execute(
+        select(PlatformConnection).where(
+            PlatformConnection.company_id == user.company_id,
+            PlatformConnection.platform == "meta",
+        )
+    )
+    conn = conn_result.scalar_one_or_none()
+    _, _, access_token, ad_account_id, page_id_default = _get_meta_conn_and_ids(ad, conn)
+
+    svc = MetaAdsService(access_token=access_token, ad_account_id=ad_account_id)
+    try:
+        status = (body.get("status") or "").upper()
+        if status in ("ACTIVE", "PAUSED"):
+            result = await svc.update_ad_status(meta_ad_id, status)
+        elif body.get("headline") or body.get("body"):
+            # Creative text update — requires image_hash + page_id
+            image_hash = body.get("image_hash", "")
+            if not image_hash:
+                raise HTTPException(status_code=422, detail="image_hash is required when updating creative text.")
+            result = await svc.update_ad_creative(
+                meta_ad_id=meta_ad_id,
+                page_id=body.get("page_id") or page_id_default,
+                image_hash=image_hash,
+                headline=body.get("headline", ""),
+                body=body.get("body", ""),
+                cta_type=(body.get("cta_type") or "LEARN_MORE").upper(),
+                link_url=body.get("link_url", ""),
+                ad_name=ad.title,
+            )
+        else:
+            raise HTTPException(status_code=422, detail="Provide status (ACTIVE|PAUSED) or creative fields (headline, body).")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Meta update_ad failed for meta_ad %s: %s", meta_ad_id, exc, exc_info=True)
+        raise HTTPException(status_code=502, detail=str(exc))
+    finally:
+        await svc.close()
+
+    return result
+
+
+@router.delete("/{ad_id}/meta-ads/{meta_ad_id}", status_code=204)
+async def delete_meta_ad(
+    ad_id: str,
+    meta_ad_id: str,
+    user: User = Depends(require_roles([UserRole.PUBLISHER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Delete a Meta ad. Also removes it from the campaign's stored meta_ad_ids list.
+    """
+    from app.services.meta_ads_service import MetaAdsService
+    from app.models.models import PlatformConnection
+    from sqlalchemy.orm.attributes import flag_modified
+
+    ad_result = await db.execute(
+        select(Advertisement).where(
+            Advertisement.id == ad_id,
+            Advertisement.company_id == user.company_id,
+        )
+    )
+    ad = ad_result.scalar_one_or_none()
+    if not ad:
+        raise HTTPException(status_code=404, detail="Advertisement not found")
+
+    conn_result = await db.execute(
+        select(PlatformConnection).where(
+            PlatformConnection.company_id == user.company_id,
+            PlatformConnection.platform == "meta",
+        )
+    )
+    conn = conn_result.scalar_one_or_none()
+    _, _, access_token, ad_account_id, _ = _get_meta_conn_and_ids(ad, conn)
+
+    svc = MetaAdsService(access_token=access_token, ad_account_id=ad_account_id)
+    try:
+        await svc.delete_ad(meta_ad_id)
+    except Exception as exc:
+        logger.error("Meta delete_ad failed for meta_ad %s: %s", meta_ad_id, exc, exc_info=True)
+        raise HTTPException(status_code=502, detail=str(exc))
+    finally:
+        await svc.close()
+
+    # Remove from stored ad_ids list
+    bot = dict(ad.bot_config or {})
+    existing_ids = bot.get("meta_ad_ids", [])
+    bot["meta_ad_ids"] = [i for i in existing_ids if i != meta_ad_id]
+    ad.bot_config = bot
+    flag_modified(ad, "bot_config")
+    await db.commit()
+
+
+@router.get("/{ad_id}/meta-insights")
+async def get_meta_insights(
+    ad_id: str,
+    date_preset: str = "last_30d",
+    user: User = Depends(require_roles([UserRole.PUBLISHER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Fetch daily performance insights from Meta and persist them in AdAnalytics.
+    Each day's row is upserted by (advertisement_id, date_label, source='meta').
+    Returns the structured daily data directly for charting.
+
+    date_preset: last_7d | last_14d | last_30d | last_90d
+    """
+    from app.services.meta_ads_service import MetaAdsService
+    from app.models.models import PlatformConnection, AdAnalytics
+    from sqlalchemy.orm.attributes import flag_modified
+
+    ad_result = await db.execute(
+        select(Advertisement).where(
+            Advertisement.id == ad_id,
+            Advertisement.company_id == user.company_id,
+        )
+    )
+    ad = ad_result.scalar_one_or_none()
+    if not ad:
+        raise HTTPException(status_code=404, detail="Advertisement not found")
+
+    conn_result = await db.execute(
+        select(PlatformConnection).where(
+            PlatformConnection.company_id == user.company_id,
+            PlatformConnection.platform == "meta",
+        )
+    )
+    conn = conn_result.scalar_one_or_none()
+    campaign_id, _, access_token, ad_account_id, _ = _get_meta_conn_and_ids(ad, conn)
+
+    svc = MetaAdsService(access_token=access_token, ad_account_id=ad_account_id)
+    try:
+        raw_rows = await svc.get_insights(campaign_id, date_preset=date_preset)
+    except Exception as exc:
+        logger.error("Meta get_insights failed for ad %s: %s", ad_id, exc, exc_info=True)
+        raise HTTPException(status_code=502, detail=str(exc))
+    finally:
+        await svc.close()
+
+    # Parse and upsert daily rows into AdAnalytics
+    result_rows = []
+    for row in raw_rows:
+        date_label = row.get("date_start", "")
+        impressions = int(row.get("impressions", 0) or 0)
+        clicks      = int(row.get("clicks", 0) or 0)
+        spend       = float(row.get("spend", 0) or 0)
+        reach       = int(row.get("reach", 0) or 0)
+        cpm         = float(row.get("cpm", 0) or 0)
+        cpc         = float(row.get("cpc", 0) or 0)
+        # Count link click actions as conversions
+        actions = row.get("actions") or []
+        conversions = sum(
+            int(a.get("value", 0) or 0)
+            for a in actions
+            if a.get("action_type") in ("offsite_conversion.fb_pixel_lead", "link_click")
+        )
+        click_rate = round(clicks / impressions * 100, 4) if impressions else 0.0
+
+        # Upsert: find existing row by date_label + source
+        existing_result = await db.execute(
+            select(AdAnalytics).where(
+                AdAnalytics.advertisement_id == ad_id,
+                AdAnalytics.date_label == date_label,
+                AdAnalytics.source == "meta",
+            )
+        )
+        existing = existing_result.scalar_one_or_none()
+        if existing:
+            existing.impressions = impressions
+            existing.views       = impressions
+            existing.click_rate  = click_rate
+            existing.conversions = conversions
+            existing.spend       = spend
+            existing.reach       = reach
+            existing.cpm         = cpm
+            existing.cost_per_click = cpc
+        else:
+            entry = AdAnalytics(
+                advertisement_id=ad_id,
+                date_label=date_label,
+                source="meta",
+                impressions=impressions,
+                views=impressions,
+                click_rate=click_rate,
+                conversions=conversions,
+                spend=spend,
+                reach=reach,
+                cpm=cpm,
+                cost_per_click=cpc,
+            )
+            db.add(entry)
+
+        result_rows.append({
+            "date": date_label,
+            "impressions": impressions,
+            "clicks": clicks,
+            "spend": spend,
+            "reach": reach,
+            "cpm": cpm,
+            "cpc": cpc,
+            "conversions": conversions,
+            "click_rate": click_rate,
+        })
+
+    await db.commit()
+    return {"date_preset": date_preset, "rows": result_rows, "campaign_id": campaign_id}
+
+
+@router.get("/{ad_id}/schedule-suggestions")
+async def get_schedule_suggestions(
+    ad_id: str,
+    user: User = Depends(require_roles([UserRole.PUBLISHER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Use Claude to suggest optimal ad scheduling (best times to run/pause, days, budget pacing)
+    based on the campaign's strategy, target audience, and available performance data.
+    """
+    import json as _json
+    from app.core.bedrock import get_async_client, get_model
+
+    ad_result = await db.execute(
+        select(Advertisement).where(
+            Advertisement.id == ad_id,
+            Advertisement.company_id == user.company_id,
+        )
+    )
+    ad = ad_result.scalar_one_or_none()
+    if not ad:
+        raise HTTPException(status_code=404, detail="Advertisement not found")
+
+    from app.models.models import AdAnalytics as _AdAnalytics
+    analytics_result = await db.execute(
+        select(_AdAnalytics)
+        .where(_AdAnalytics.advertisement_id == ad_id)
+        .order_by(_AdAnalytics.recorded_at.desc())
+        .limit(30)
+    )
+    analytics = analytics_result.scalars().all()
+
+    strategy = ad.strategy_json or {}
+    kpis     = strategy.get("kpis", [])
+    audience = ad.target_audience or {}
+    recent_perf = [
+        {
+            "date": a.date_label,
+            "impressions": a.impressions,
+            "clicks": a.views,
+            "ctr": a.click_rate,
+            "spend": a.spend,
+        }
+        for a in analytics if a.source == "meta"
+    ][:10]
+
+    prompt = f"""You are a Meta advertising strategy expert specialising in healthcare clinical trial recruitment.
+
+Campaign: {ad.title}
+Target Audience: {_json.dumps(audience)}
+Strategy KPIs: {_json.dumps(kpis)}
+Trial Duration: {ad.duration or "not set"}
+Budget: ${ad.budget or "not set"}/total
+
+Recent performance (last {len(recent_perf)} days of Meta data):
+{_json.dumps(recent_perf, indent=2) if recent_perf else "No Meta data available yet — use healthcare audience best practices."}
+
+Based on this context, provide concrete scheduling recommendations in JSON with this structure:
+{{
+  "best_days": ["Monday", "Tuesday", ...],
+  "best_hours": ["9am-11am", "7pm-9pm", ...],
+  "pause_periods": ["Saturday afternoon", "Sunday morning", ...],
+  "budget_pacing": "Front-load budget in first 2 weeks to build audience momentum",
+  "headline_tips": ["Use urgency language Mon-Wed", "..."],
+  "reasoning": "2-3 sentence explanation",
+  "confidence": "high|medium|low"
+}}
+
+Return ONLY valid JSON, no markdown or explanation."""
+
+    client = get_async_client()
+    try:
+        msg = await client.messages.create(
+            model=get_model(),
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+        suggestions = _json.loads(raw)
+    except Exception as exc:
+        logger.warning("Schedule suggestions Claude call failed: %s", exc)
+        # Sensible healthcare fallback
+        suggestions = {
+            "best_days": ["Monday", "Tuesday", "Wednesday", "Thursday"],
+            "best_hours": ["9am–11am", "12pm–1pm", "7pm–9pm"],
+            "pause_periods": ["Saturday night", "Sunday morning"],
+            "budget_pacing": "Distribute budget evenly across weekdays; reduce by 40% on weekends.",
+            "headline_tips": ["Lead with patient benefit on Mon–Wed", "Use urgency copy Thu–Fri"],
+            "reasoning": "Healthcare audiences engage highest on weekday mornings and evenings. Weekend engagement drops significantly for clinical trial ads.",
+            "confidence": "medium",
+        }
+
+    return {"ad_id": ad_id, "suggestions": suggestions}
+
+
 # ─── Bot Configuration ────────────────────────────────────────────────────────
 
 async def _user_from_query_token_ads(

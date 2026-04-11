@@ -293,6 +293,11 @@ class AnalyticsOut(BaseModel):
     impressions: Optional[int] = None
     conversions: Optional[int] = None
     cost_per_click: Optional[float] = None
+    spend: Optional[float] = None
+    reach: Optional[int] = None
+    cpm: Optional[float] = None
+    date_label: Optional[str] = None
+    source: Optional[str] = None
 
     class Config:
         from_attributes = True

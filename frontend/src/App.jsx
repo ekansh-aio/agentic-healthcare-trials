@@ -75,6 +75,7 @@ function AppRoutes() {
       <Route path="/publisher" element={<ProtectedRoute allowedRoles={["publisher"]}><PublisherDashboard /></ProtectedRoute>} />
       <Route path="/publisher/deploy" element={<ProtectedRoute allowedRoles={["publisher"]}><PublisherDashboard /></ProtectedRoute>} />
       <Route path="/publisher/distribute" element={<ProtectedRoute allowedRoles={["publisher"]}><PublisherDashboard /></ProtectedRoute>} />
+      <Route path="/publisher/manage" element={<ProtectedRoute allowedRoles={["publisher"]}><PublisherDashboard /></ProtectedRoute>} />
       <Route path="/publisher/analytics" element={<ProtectedRoute allowedRoles={["publisher"]}><PublisherDashboard /></ProtectedRoute>} />
       <Route path="/publisher/settings" element={<ProtectedRoute allowedRoles={["publisher"]}><PublisherDashboard /></ProtectedRoute>} />
       <Route path="/publisher/campaign/:id" element={<ProtectedRoute allowedRoles={["publisher"]}><CampaignDetailPage /></ProtectedRoute>} />

@@ -94,6 +94,7 @@ async def get_meta_oauth_url(
         "pages_manage_ads",
         "pages_read_engagement",
         "pages_show_list",
+        "business_management",
     ])
 
     url = (

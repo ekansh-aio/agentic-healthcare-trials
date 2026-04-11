@@ -124,7 +124,16 @@ class MetaAdsService:
 
     @staticmethod
     def fetch_pages(access_token: str) -> list:
-        """List Facebook pages managed by this user."""
+        """
+        List Facebook pages accessible to this user.
+        Combines two sources:
+          1. /me/accounts — pages where the user has a personal page role
+          2. /me/businesses → owned_pages — pages owned by the user's Business Manager(s)
+        Deduplicates by page ID.
+        """
+        pages: dict[str, dict] = {}
+
+        # Source 1: personal page roles
         resp = requests.get(
             f"{META_BASE_URL}/me/accounts",
             params={"fields": "id,name,category", "access_token": access_token},
@@ -133,12 +142,36 @@ class MetaAdsService:
         body = resp.json()
         if "error" in body:
             raise RuntimeError(body["error"].get("message"))
-        return body.get("data", [])
+        for p in body.get("data", []):
+            pages[p["id"]] = p
+
+        # Source 2: Business Manager-owned pages
+        biz_resp = requests.get(
+            f"{META_BASE_URL}/me/businesses",
+            params={"fields": "id,name,owned_pages{id,name,category}", "access_token": access_token},
+            timeout=30,
+        )
+        biz_body = biz_resp.json()
+        for biz in biz_body.get("data", []):
+            for p in (biz.get("owned_pages") or {}).get("data", []):
+                pages.setdefault(p["id"], p)
+
+        return list(pages.values())
 
     # ─── Low-level helpers ─────────────────────────────────────────────────────
 
     def _url(self, path: str) -> str:
         return f"{META_BASE_URL}/{path}"
+
+    def _raise_if_error(self, body: dict) -> None:
+        if "error" in body:
+            err = body["error"]
+            logger.error("Meta API full error response: %s", body)
+            raise RuntimeError(
+                f"Meta API error {err.get('code')} ({err.get('error_subcode', '')}): "
+                f"{err.get('message', 'Unknown error')} | "
+                f"{err.get('error_user_msg', '')} | fbtrace: {err.get('fbtrace_id', '')}"
+            )
 
     async def _post(self, path: str, data: dict) -> dict:
         """Form-encoded POST via requests in a thread pool."""
@@ -150,14 +183,32 @@ class MetaAdsService:
             return resp.json()
 
         body = await asyncio.to_thread(_sync_post)
-        if "error" in body:
-            err = body["error"]
-            logger.error("Meta API full error response: %s", body)
-            raise RuntimeError(
-                f"Meta API error {err.get('code')} ({err.get('error_subcode', '')}): "
-                f"{err.get('message', 'Unknown error')} | "
-                f"{err.get('error_user_msg', '')} | fbtrace: {err.get('fbtrace_id', '')}"
-            )
+        self._raise_if_error(body)
+        return body
+
+    async def _get(self, path: str, params: Optional[dict] = None) -> dict:
+        """GET request via requests in a thread pool."""
+        all_params = {**(params or {}), "access_token": self.access_token}
+        url = self._url(path)
+
+        def _sync_get() -> dict:
+            resp = requests.get(url, params=all_params, timeout=60)
+            return resp.json()
+
+        body = await asyncio.to_thread(_sync_get)
+        self._raise_if_error(body)
+        return body
+
+    async def _delete_req(self, path: str) -> dict:
+        """DELETE request via requests in a thread pool."""
+        url = self._url(path)
+
+        def _sync_delete() -> dict:
+            resp = requests.delete(url, params={"access_token": self.access_token}, timeout=30)
+            return resp.json()
+
+        body = await asyncio.to_thread(_sync_delete)
+        self._raise_if_error(body)
         return body
 
     # ─── Step 1: Upload image ──────────────────────────────────────────────────
@@ -283,6 +334,95 @@ class MetaAdsService:
             },
         )
         return result["id"]
+
+    # ─── Ad Management ────────────────────────────────────────────────────────
+
+    async def get_ads(self, campaign_id: str) -> list:
+        """
+        List all ads in a Meta campaign with their current status and creative details.
+        Returns id, name, status, created_time, and creative (image_hash, headline, body, cta, link).
+        """
+        body = await self._get(
+            f"{campaign_id}/ads",
+            params={
+                "fields": (
+                    "id,name,status,created_time,"
+                    "creative{id,name,image_hash,"
+                    "object_story_spec{link_data{message,name,call_to_action{type},link}}}"
+                ),
+            },
+        )
+        return body.get("data", [])
+
+    async def update_ad_status(self, meta_ad_id: str, status: str) -> dict:
+        """
+        Enable or pause an ad.
+        status must be "ACTIVE" or "PAUSED".
+        """
+        if status not in ("ACTIVE", "PAUSED"):
+            raise ValueError(f"Invalid ad status: {status!r}. Use ACTIVE or PAUSED.")
+        return await self._post(meta_ad_id, {"status": status})
+
+    async def delete_ad(self, meta_ad_id: str) -> dict:
+        """Permanently delete a Meta ad."""
+        return await self._delete_req(meta_ad_id)
+
+    async def update_ad_creative(
+        self,
+        meta_ad_id: str,
+        page_id: str,
+        image_hash: str,
+        headline: str,
+        body: str,
+        cta_type: str,
+        link_url: str,
+        ad_name: str = "Updated Ad",
+    ) -> dict:
+        """
+        Update an ad's headline / body text.
+        Meta does not support in-place creative edits, so this:
+          1. Creates a new ad creative with the updated copy.
+          2. Points the ad to the new creative.
+        Returns the updated ad object.
+        """
+        new_creative_id = await self.create_creative(
+            name=f"{ad_name} – Updated Creative",
+            page_id=page_id,
+            image_hash=image_hash,
+            headline=headline,
+            body=body,
+            cta_type=cta_type,
+            link_url=link_url,
+        )
+        return await self._post(
+            meta_ad_id,
+            {"creative": json.dumps({"creative_id": new_creative_id})},
+        )
+
+    # ─── Insights ──────────────────────────────────────────────────────────────
+
+    async def get_insights(
+        self,
+        campaign_id: str,
+        date_preset: str = "last_30d",
+        time_increment: int = 1,
+    ) -> list:
+        """
+        Fetch daily performance insights for a campaign.
+        date_preset: last_7d | last_14d | last_30d | last_90d | this_month | last_month
+        time_increment: 1 = daily breakdown, "monthly" = monthly.
+        Returns list of {date_start, date_stop, impressions, clicks, spend, reach, cpm, cpc, actions}.
+        """
+        body = await self._get(
+            f"{campaign_id}/insights",
+            params={
+                "fields": "impressions,clicks,spend,reach,cpm,cpc,actions,date_start,date_stop",
+                "date_preset": date_preset,
+                "time_increment": str(time_increment),
+                "limit": "90",
+            },
+        )
+        return body.get("data", [])
 
     # ─── Orchestrator ─────────────────────────────────────────────────────────
 
