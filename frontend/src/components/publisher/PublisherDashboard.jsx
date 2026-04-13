@@ -1095,7 +1095,7 @@ function VoicebotConfig({ ad }) {
     setTestCallStatus("calling");
     setTestCallMsg("");
     try {
-      await adsAPI.requestVoiceCall(ad.id, phone);
+      await adsAPI.requestVoiceCall(ad.id, { phone_number: phone, action: "call_now" });
       setTestCallStatus("done");
       setTestCallMsg("Calling now — your phone should ring shortly.");
     } catch (err) {
@@ -2539,7 +2539,7 @@ function AdPreviewModal({ ad, onClose }) {
             <div key={i} className="ad-creative-card">
               <div className="ad-creative-card__image-area" style={{ aspectRatio: aspectRatioForFormat(c.format) }}>
                 {c.image_url ? (
-                  <img src={c.image_url} alt={c.headline} className="w-full h-full object-cover" />
+                  <img src={c.image_url} alt={c.headline} style={{ maxHeight: "260px", maxWidth: "100%", width: "auto", height: "auto", display: "block" }} />
                 ) : (
                   <div className="flex flex-col items-center gap-2">
                     <ImageOff size={28} style={{ color: "var(--color-sidebar-text)" }} />

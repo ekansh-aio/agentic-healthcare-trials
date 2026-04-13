@@ -33,24 +33,40 @@ function CreativesGrid({ creatives }) {
 
   return (
     <>
-      {/* Lightbox */}
+      {/* Lightbox — centred in viewport */}
       {lightbox && (
-        <div
-          onClick={() => setLightbox(null)}
-          style={{
-            position: "fixed", inset: 0, zIndex: 1000,
-            backgroundColor: "rgba(0,0,0,0.85)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "zoom-out",
-          }}
-        >
-          <img
-            src={lightbox}
-            alt="Ad creative"
-            style={{ maxHeight: "90vh", maxWidth: "90vw", borderRadius: 12, objectFit: "contain" }}
-            onClick={(e) => e.stopPropagation()}
+        <>
+          <div
+            onClick={() => setLightbox(null)}
+            style={{ position: "fixed", inset: 0, zIndex: 999, backgroundColor: "rgba(0,0,0,0.75)", backdropFilter: "blur(3px)" }}
           />
-        </div>
+          <div
+            style={{
+              position: "fixed", zIndex: 1000,
+              top: "50%", left: "50%",
+              transform: "translate(-50%, -50%)",
+              borderRadius: 14,
+              overflow: "hidden",
+              boxShadow: "0 12px 40px rgba(0,0,0,0.35)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={lightbox}
+              alt="Ad creative"
+              style={{ maxHeight: "80vh", maxWidth: "80vw", display: "block", objectFit: "contain" }}
+            />
+            <button
+              onClick={() => setLightbox(null)}
+              style={{
+                position: "absolute", top: 8, right: 8,
+                background: "rgba(0,0,0,0.55)", border: "none", borderRadius: 6,
+                padding: "3px 6px", cursor: "pointer", color: "#fff",
+                display: "flex", alignItems: "center", fontSize: 16,
+              }}
+            >✕</button>
+          </div>
+        </>
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 18 }}>
@@ -58,25 +74,35 @@ function CreativesGrid({ creatives }) {
           <div
             key={i}
             style={{
-              borderRadius: 12,
-              border: "1px solid var(--color-card-border)",
+              borderRadius: 16,
+              border: "2px solid var(--color-card-border)",
               backgroundColor: "var(--color-card-bg)",
-              overflow: "hidden",
+              boxShadow: "0 4px 18px rgba(0,0,0,0.10)",
+              overflow: "visible",
+              padding: "10px 10px 0 10px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
             }}
           >
             {/* Image area */}
             <div style={{
               position: "relative",
               backgroundColor: "var(--color-page-bg)",
-              aspectRatio: c.format?.includes("1920") ? "9/16" : c.format?.includes("16:9") ? "16/9" : "1/1",
               overflow: "hidden",
               maxHeight: 220,
+              maxWidth: "100%",
+              borderRadius: 10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              alignSelf: "center",
             }}>
               {c.image_url ? (
                 <img
                   src={c.image_url}
                   alt={c.headline}
-                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                  style={{ maxHeight: 220, maxWidth: "100%", width: "auto", height: "auto", display: "block" }}
                 />
               ) : (
                 <div style={{
@@ -117,7 +143,7 @@ function CreativesGrid({ creatives }) {
             </div>
 
             {/* Copy */}
-            <div style={{ padding: 16 }}>
+            <div style={{ padding: 16, textAlign: "center", width: "100%" }}>
               <p style={{
                 fontSize: "0.98rem", fontWeight: 700,
                 color: "var(--color-input-text)", marginBottom: 6, lineHeight: 1.3,
@@ -130,7 +156,7 @@ function CreativesGrid({ creatives }) {
               }}>
                 {c.body}
               </p>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12 }}>
                 <span style={{
                   fontSize: "0.75rem", fontWeight: 600,
                   padding: "4px 12px", borderRadius: 999,

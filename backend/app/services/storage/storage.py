@@ -50,6 +50,19 @@ class LocalStorageBackend:
 
     BASE_DIR = os.path.join(_BACKEND_ROOT, "uploads")
 
+    async def save_bytes(self, data: bytes, subfolder: str, filename: str) -> str:
+        """
+        Save raw bytes and return the stored path/URL.
+        Used by the chunked upload flow to assemble and persist a file
+        without requiring a FastAPI UploadFile object.
+        """
+        dest_dir = os.path.join(self.BASE_DIR, subfolder)
+        os.makedirs(dest_dir, exist_ok=True)
+        dest_path = os.path.join(dest_dir, filename)
+        with open(dest_path, "wb") as f:
+            f.write(data)
+        return f"/uploads/{subfolder}/{filename}"
+
     async def save(self, file: UploadFile, subfolder: str, filename: str) -> str:
         """
         Save an uploaded file and return the stored path/URL.

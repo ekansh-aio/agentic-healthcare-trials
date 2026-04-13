@@ -8,6 +8,7 @@ PATCH /company/locations — Update operating locations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
+from sqlalchemy.orm.attributes import flag_modified
 from typing import List, Optional
 from pydantic import BaseModel
 
@@ -65,6 +66,7 @@ async def update_locations(
     result = await db.execute(select(Company).where(Company.id == user.company_id))
     company = result.scalar_one()
     company.locations = [loc.model_dump() for loc in body.locations]
+    flag_modified(company, "locations")
     await db.flush()
     return CompanyProfile(
         id=company.id,

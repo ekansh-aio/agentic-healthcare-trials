@@ -12,6 +12,7 @@ File storage note:
   To migrate to Azure Blob Storage, update storage.py only — no changes needed here.
 """
 
+import asyncio
 import logging
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +33,15 @@ logger = logging.getLogger(__name__)
 
 
 async def _background_train(company_id: str) -> None:
+    async with async_session_factory() as db:
+        try:
+            await TrainingService(db).train_company_skills(company_id)
+        except Exception as exc:
+            logger.error("Background training failed for company %s: %s", company_id, exc)
+
+
+async def _background_train_and_mark(company_id: str) -> None:
+    """Run AI skill training in the background. Company is already marked onboarded before this runs."""
     async with async_session_factory() as db:
         try:
             await TrainingService(db).train_company_skills(company_id)
@@ -115,7 +125,7 @@ async def upload_document(
         )
         if not content:
             disk_path = url_to_disk_path(file_path, BACKEND_ROOT)
-            content   = extract_text(disk_path)
+            content   = await asyncio.to_thread(extract_text, disk_path)
 
     doc = CompanyDocument(
         company_id=user.company_id,
@@ -131,35 +141,25 @@ async def upload_document(
     return doc
 
 
-@router.post("/train", response_model=TrainingStatus)
+@router.post("/train", status_code=202)
 async def trigger_training(
+    background_tasks: BackgroundTasks,
     user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR])),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Trigger AI Training (skill-creator):
-    1. Read skill.md templates for Curator and Reviewer
-    2. Fill placeholders with company-specific data from onboarding
-    3. Generate customized skill.md files
+    Trigger AI Training (skill-creator) — runs in background to avoid gateway timeouts.
+    Returns 202 immediately; training (Claude × 2 skills) continues asynchronously.
+    1. Mark company as onboarded immediately so the user can access the platform.
+    2. Read skill.md templates for Curator and Reviewer.
+    3. Fill placeholders with company-specific data from onboarding.
+    4. Generate customized skill.md files in the background.
     """
-    try:
-        trainer = TrainingService(db)
-        training_status = await trainer.train_company_skills(user.company_id)
+    company_result = await db.execute(select(Company).where(Company.id == user.company_id))
+    company = company_result.scalar_one_or_none()
+    if company and not company.onboarded:
+        company.onboarded = True
+        await db.commit()
 
-        # Mark the company as fully onboarded now that training succeeded.
-        company_result = await db.execute(select(Company).where(Company.id == user.company_id))
-        company = company_result.scalar_one_or_none()
-        if company:
-            company.onboarded = True
-            await db.commit()
-
-        return training_status
-    except FileNotFoundError as e:
-        logger.error("Training failed — skill template file missing: %s", e)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Skill template file not found on server: {e}. Redeploy the backend image.",
-        )
-    except Exception as e:
-        logger.error("Training failed for company %s: %s", user.company_id, e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    background_tasks.add_task(_background_train_and_mark, user.company_id)
+    return {"status": "training_started", "company_id": user.company_id}

@@ -57,42 +57,39 @@ class TrainingService:
         self.db = db
 
     async def train_company_skills(self, company_id: str) -> TrainingStatus:
-        # Load company record
-        result = await self.db.execute(select(Company).where(Company.id == company_id))
-        company = result.scalar_one_or_none()
-        if not company:
-            raise ValueError(f"Company {company_id} not found")
+        # ── Phase 1: read-only DB fetch (hold connection briefly) ────────────
+        async with async_session_factory() as read_db:
+            result = await read_db.execute(select(Company).where(Company.id == company_id))
+            company = result.scalar_one_or_none()
+            if not company:
+                raise ValueError(f"Company {company_id} not found")
 
-        # Acquire a PostgreSQL advisory lock to prevent concurrent training races.
-        # Skipped for SQLite (no advisory lock support needed for single-process dev).
-        if _is_postgres:
-            await self.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:cid))"), {"cid": company_id})
+            docs_result = await read_db.execute(
+                select(CompanyDocument).where(CompanyDocument.company_id == company_id)
+            )
+            docs = docs_result.scalars().all()
 
-        # Load all company documents
-        docs_result = await self.db.execute(
-            select(CompanyDocument).where(CompanyDocument.company_id == company_id)
-        )
-        docs = docs_result.scalars().all()
+            def concat(doc_type):
+                return "\n".join(d.content for d in docs if d.doc_type == doc_type and d.content)
 
-        # Build company_data dict that mirrors the JSON format the trainer expects
-        def concat(doc_type):
-            return "\n".join(d.content for d in docs if d.doc_type == doc_type and d.content)
+            company_data = {
+                "company_name":       company.name,
+                "industry":           company.industry or "",
+                "usp_summary":        concat("usp"),
+                "marketing_goals":    concat("marketing_goal"),
+                "compliance_notes":   concat("compliance"),
+                "ethical_guidelines": concat("ethical_guideline"),
+                "lessons_learned":    concat("reference") or "No lessons learned yet.",
+            }
+            company_name = company.name
+        # read_db session is closed here — connection returned to pool
 
-        company_data = {
-            "company_name":       company.name,
-            "industry":           company.industry or "",
-            "usp_summary":        concat("usp"),
-            "marketing_goals":    concat("marketing_goal"),
-            "compliance_notes":   concat("compliance"),
-            "ethical_guidelines": concat("ethical_guideline"),
-            "lessons_learned":    concat("reference") or "No lessons learned yet.",
-        }
-
+        # ── Phase 2: call Claude (NO DB connection held) ─────────────────────
         trainer_skill = load_file(TRAINER_SKILL)
-        skill_versions = {}
+        filled_skills: dict[str, str] = {}
 
         for skill_name in TEMPLATES_TO_TRAIN:
-            print(f"  -> Training {skill_name} skill for company {company.name}...")
+            print(f"  -> Training {skill_name} skill for company {company_name}...")
             template_path = os.path.join(TEMPLATES_DIR, f"{skill_name}_template.md")
             template = load_file(template_path)
 
@@ -105,58 +102,63 @@ class TrainingService:
                 print(f"    No AI backend configured, storing template as-is")
                 filled = template
 
-            # Upsert: insert if not exists, update skill_md + bump version if exists.
-            if _is_postgres:
-                stmt = (
-                    pg_insert(SkillConfig)
-                    .values(
-                        company_id=company_id,
-                        skill_type=skill_name,
-                        skill_md=filled,
-                        version=1,
-                    )
-                    .on_conflict_do_update(
-                        index_elements=["company_id", "skill_type"],
-                        set_={
-                            "skill_md": filled,
-                            "version":  SkillConfig.version + 1,
-                        },
-                    )
-                    .returning(SkillConfig.version)
-                )
-                row = await self.db.execute(stmt)
-                version = row.scalar_one()
-            else:
-                # SQLite upsert (supported since SQLite 3.24)
-                stmt = (
-                    sqlite_insert(SkillConfig)
-                    .values(
-                        company_id=company_id,
-                        skill_type=skill_name,
-                        skill_md=filled,
-                        version=1,
-                    )
-                    .on_conflict_do_update(
-                        index_elements=["company_id", "skill_type"],
-                        set_={
-                            "skill_md": filled,
-                            "version":  SkillConfig.version + 1,
-                        },
-                    )
-                )
-                await self.db.execute(stmt)
-                row = await self.db.execute(
-                    select(SkillConfig.version).where(
-                        SkillConfig.company_id == company_id,
-                        SkillConfig.skill_type == skill_name,
-                    )
-                )
-                version = row.scalar_one()
+            filled_skills[skill_name] = filled
 
-            skill_versions[skill_name] = version
-            print(f"  [OK] {skill_name} skill saved to DB (v{version})")
+        # ── Phase 3: write results (hold connection briefly) ─────────────────
+        skill_versions = {}
+        async with async_session_factory() as write_db:
+            for skill_name, filled in filled_skills.items():
+                if _is_postgres:
+                    stmt = (
+                        pg_insert(SkillConfig)
+                        .values(
+                            company_id=company_id,
+                            skill_type=skill_name,
+                            skill_md=filled,
+                            version=1,
+                        )
+                        .on_conflict_do_update(
+                            index_elements=["company_id", "skill_type"],
+                            set_={
+                                "skill_md": filled,
+                                "version":  SkillConfig.version + 1,
+                            },
+                        )
+                        .returning(SkillConfig.version)
+                    )
+                    row = await write_db.execute(stmt)
+                    version = row.scalar_one()
+                else:
+                    stmt = (
+                        sqlite_insert(SkillConfig)
+                        .values(
+                            company_id=company_id,
+                            skill_type=skill_name,
+                            skill_md=filled,
+                            version=1,
+                        )
+                        .on_conflict_do_update(
+                            index_elements=["company_id", "skill_type"],
+                            set_={
+                                "skill_md": filled,
+                                "version":  SkillConfig.version + 1,
+                            },
+                        )
+                    )
+                    await write_db.execute(stmt)
+                    row = await write_db.execute(
+                        select(SkillConfig.version).where(
+                            SkillConfig.company_id == company_id,
+                            SkillConfig.skill_type == skill_name,
+                        )
+                    )
+                    version = row.scalar_one()
 
-        await self.db.commit()
+                skill_versions[skill_name] = version
+                print(f"  [OK] {skill_name} skill saved to DB (v{version})")
+
+            await write_db.commit()
+        # write_db session is closed here
 
         return TrainingStatus(
             company_id=company_id,

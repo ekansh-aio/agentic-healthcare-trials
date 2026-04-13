@@ -719,18 +719,32 @@ body {
   }
 
   .ad-creative-card {
-    @apply rounded-xl overflow-hidden;
-    border: 1px solid var(--color-card-border);
+    @apply rounded-2xl;
+    border: 2px solid var(--color-card-border);
+    background-color: var(--color-card-bg);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.10);
+    overflow: visible;
+    padding: 10px 10px 0 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
   }
 
   .ad-creative-card__image-area {
-    @apply w-full flex items-center justify-center;
+    @apply flex items-center justify-center;
     background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
     min-height: 140px;
+    border-radius: 10px;
+    overflow: hidden;
+    max-height: 260px;
+    max-width: 100%;
+    align-self: center;
   }
 
   .ad-creative-card__body {
     @apply p-4;
+    text-align: center;
+    width: 100%;
   }
 
   .ad-creative-card__format {
@@ -742,17 +756,23 @@ body {
   .ad-creative-card__headline {
     @apply text-sm font-bold mb-1;
     color: var(--color-input-text);
+    text-align: center;
   }
 
   .ad-creative-card__body-text {
     @apply text-xs leading-relaxed mb-3;
     color: var(--color-sidebar-text);
+    text-align: center;
   }
 
   .ad-creative-card__cta {
     @apply inline-flex px-3 py-1.5 text-xs font-semibold rounded-lg;
     background-color: var(--color-btn-accent-bg);
     color: var(--color-btn-accent-text);
+    display: block;
+    text-align: center;
+    width: fit-content;
+    margin: 0 auto;
   }
 
   .ad-creative-card__prompt {

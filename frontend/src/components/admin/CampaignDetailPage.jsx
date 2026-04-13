@@ -59,6 +59,7 @@ function DocPreviewModal({ doc, adId, onClose }) {
 
   const [textContent, setTextContent] = useState(null);
   const [textError,   setTextError]   = useState(false);
+  const [pdfError,    setPdfError]    = useState(false);
 
   useEffect(() => {
     if (mode !== "text") return;
@@ -102,8 +103,23 @@ function DocPreviewModal({ doc, adId, onClose }) {
 
         {/* Body */}
         <div style={{ flex: 1, overflow: "hidden", position: "relative", minHeight: 560 }}>
-          {mode === "pdf" && (
-            <iframe src={url} title={doc.title} style={{ width: "100%", height: "100%", border: "none", display: "block", minHeight: 560 }} />
+          {mode === "pdf" && !pdfError && (
+            <iframe
+              src={url}
+              title={doc.title}
+              style={{ width: "100%", height: "100%", border: "none", display: "block", minHeight: 560 }}
+              onError={() => setPdfError(true)}
+            />
+          )}
+          {mode === "pdf" && pdfError && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: "48px 24px", textAlign: "center" }}>
+              <FileText size={40} style={{ color: "var(--color-sidebar-text)", opacity: 0.5 }} />
+              <p style={{ color: "var(--color-input-text)", fontWeight: 600, fontSize: "0.95rem" }}>Could not load PDF preview</p>
+              <p style={{ color: "var(--color-sidebar-text)", fontSize: "0.82rem", maxWidth: 340 }}>The file may still be accessible via download.</p>
+              <a href={url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "9px 18px", borderRadius: 8, fontSize: "0.85rem", fontWeight: 600, cursor: "pointer", textDecoration: "none", backgroundColor: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.1)", border: "1px solid var(--color-accent)", color: "var(--color-accent)" }}>
+                <Download size={15} /> Open PDF
+              </a>
+            </div>
           )}
           {mode === "text" && (
             <div style={{ height: "100%", overflowY: "auto", padding: "20px 24px" }}>
@@ -1891,52 +1907,88 @@ function ReviewCard({ review }) {
 
 // ─── Creatives Viewer ─────────────────────────────────────────────────────────
 function CreativesViewer({ creatives }) {
-  const [lightbox, setLightbox] = useState(null);
+  const [popover, setPopover] = useState(null); // { url, top, left }
+
+  const openPopover = (e, url) => {
+    setPopover({ url });
+  };
+
   if (!creatives?.length) return null;
 
   return (
     <>
-      {/* Lightbox */}
-      {lightbox && (
-        <div
-          onClick={() => setLightbox(null)}
-          style={{
-            position: "fixed", inset: 0, zIndex: 1000,
-            backgroundColor: "rgba(0,0,0,0.85)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "zoom-out",
-          }}
-        >
-          <img
-            src={lightbox}
-            alt="Ad creative"
-            style={{ maxHeight: "90vh", maxWidth: "90vw", borderRadius: "12px", objectFit: "contain" }}
-            onClick={(e) => e.stopPropagation()}
+      {/* Click-anchored popover */}
+      {popover && (
+        <>
+          <div
+            onClick={() => setPopover(null)}
+            style={{ position: "fixed", inset: 0, zIndex: 999 }}
           />
-        </div>
+          <div
+            style={{
+              position: "fixed", zIndex: 1000,
+              top: "50%", left: "50%",
+              transform: "translate(-50%, -50%)",
+              width: 420,
+              backgroundColor: "var(--color-card-bg)",
+              border: "1px solid var(--color-card-border)",
+              borderRadius: "14px",
+              boxShadow: "0 12px 40px rgba(0,0,0,0.35)",
+              overflow: "hidden",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={popover.url}
+              alt="Ad creative"
+              style={{ width: "100%", display: "block", objectFit: "contain", maxHeight: 360 }}
+            />
+            <button
+              onClick={() => setPopover(null)}
+              style={{
+                position: "absolute", top: 8, right: 8,
+                background: "rgba(0,0,0,0.55)", border: "none", borderRadius: "6px",
+                padding: "3px 6px", cursor: "pointer", color: "#fff",
+                display: "flex", alignItems: "center",
+              }}
+            >
+              <XIcon size={13} />
+            </button>
+          </div>
+        </>
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "20px" }}>
         {creatives.map((c, i) => (
           <div key={i} style={{
-            borderRadius: "12px",
-            border: "1px solid var(--color-card-border)",
+            borderRadius: "16px",
+            border: "2px solid var(--color-card-border)",
             backgroundColor: "var(--color-card-bg)",
-            overflow: "hidden",
+            boxShadow: "0 4px 18px rgba(0,0,0,0.10)",
+            overflow: "visible",
+            padding: "10px 10px 0 10px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
           }}>
             {/* Image */}
             <div style={{
               position: "relative",
               backgroundColor: "var(--color-page-bg)",
-              aspectRatio: c.format?.includes("1920") ? "9/16" : c.format?.includes("16:9") ? "16/9" : "1/1",
               overflow: "hidden",
               maxHeight: "260px",
+              maxWidth: "100%",
+              borderRadius: "10px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              alignSelf: "center",
             }}>
               {c.image_url ? (
                 <img
                   src={c.image_url}
                   alt={c.headline}
-                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                  style={{ maxHeight: "260px", maxWidth: "100%", width: "auto", height: "auto", display: "block" }}
                 />
               ) : (
                 <div style={{
@@ -1961,7 +2013,7 @@ function CreativesViewer({ creatives }) {
               {/* View full size button */}
               {c.image_url && (
                 <button
-                  onClick={() => setLightbox(c.image_url)}
+                  onClick={(e) => openPopover(e, c.image_url)}
                   style={{
                     position: "absolute", top: "8px", right: "8px",
                     background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "6px",
@@ -1976,7 +2028,7 @@ function CreativesViewer({ creatives }) {
             </div>
 
             {/* Copy */}
-            <div style={{ padding: "16px" }}>
+            <div style={{ padding: "16px", textAlign: "center", width: "100%" }}>
               <p style={{
                 fontSize: "1rem", fontWeight: 700,
                 color: "var(--color-input-text)", marginBottom: "6px", lineHeight: 1.3,
@@ -1989,7 +2041,7 @@ function CreativesViewer({ creatives }) {
               }}>
                 {c.body}
               </p>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "12px" }}>
                 <span style={{
                   fontSize: "0.75rem", fontWeight: 600,
                   padding: "4px 12px", borderRadius: "999px",

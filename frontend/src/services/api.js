@@ -323,25 +323,75 @@ export const adsAPI = {
       body: JSON.stringify(data),
     }),
 
-  // Upload a campaign-specific protocol document.
-  // Stored at uploads/docs/<company_id>/<ad_id>/<filename> — separate from company docs.
+  // Upload a campaign-specific protocol document using chunked JSON requests.
+  // Each request body stays under 8 KB to satisfy CloudFront WAF body-size rules.
+  // Files are split into 5 KB binary chunks, base64-encoded, and sent individually.
   uploadDocument: async (adId, docType, title, file) => {
     const token = localStorage.getItem("token");
-    const formData = new FormData();
-    formData.append("doc_type", docType);
-    formData.append("title", title);
-    formData.append("file", file);
+    const CHUNK_SIZE = 5120; // 5 KB — base64 ≈ 6.8 KB body, well under 8 KB WAF limit
 
-    const res = await fetch(`${API_BASE}/advertisements/${adId}/documents`, {
+    const authJson = {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || `Protocol document upload failed (HTTP ${res.status})`);
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    };
+
+    const post = async (path, body) => {
+      const res = await fetch(`${API_BASE}${path}`, {
+        ...authJson,
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        const detail = Array.isArray(err.detail)
+          ? err.detail.map((d) => `${(d.loc || []).slice(-1)[0] ?? ""}: ${d.msg}`).join("; ")
+          : (err.detail ? String(err.detail) : `Protocol document upload failed (HTTP ${res.status})`);
+        throw new Error(detail);
+      }
+      return res.json();
+    };
+
+    // Read file as raw bytes
+    const arrayBuffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+
+    // Split into CHUNK_SIZE pieces
+    const chunks = [];
+    for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+      chunks.push(bytes.slice(i, i + CHUNK_SIZE));
     }
-    return res.json();
+    // Always at least one chunk (handles empty files)
+    if (chunks.length === 0) chunks.push(new Uint8Array(0));
+
+    // base64-encode a Uint8Array without using spread (safe for large arrays)
+    const toBase64 = (arr) => {
+      let binary = "";
+      for (let i = 0; i < arr.length; i++) binary += String.fromCharCode(arr[i]);
+      return btoa(binary);
+    };
+
+    // 1. Open upload session
+    const { upload_id } = await post(`/advertisements/${adId}/documents/start`, {
+      doc_type:     docType,
+      title,
+      filename:     file.name,
+      content_type: file.type || "application/octet-stream",
+      total_chunks: chunks.length,
+    });
+
+    // 2. Send each chunk
+    for (let i = 0; i < chunks.length; i++) {
+      await post(`/advertisements/${adId}/documents/chunk`, {
+        upload_id,
+        chunk_index: i,
+        data: toBase64(chunks[i]),
+      });
+    }
+
+    // 3. Finalize — assemble on server and create DB record
+    return post(`/advertisements/${adId}/documents/finalize`, { upload_id });
   },
 
   listDocuments: (adId) => request(`/advertisements/${adId}/documents`),
@@ -459,6 +509,14 @@ export const adsAPI = {
   // No auth required — designed for embedded landing page use.
   getVoiceSessionToken: (adId) =>
     request(`/advertisements/${adId}/voice-session/token`),
+
+  // Trigger an outbound phone call via ElevenLabs voice agent.
+  // Body: { phone: "+15551234567" }
+  requestVoiceCall: (adId, body) =>
+    request(`/advertisements/${adId}/voice-call/request`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   // ── Meta Ad Management ────────────────────────────────────────────────────
   // List live ads for a campaign (fetched from Meta API)

@@ -158,13 +158,19 @@ export default function OnboardingPage() {
         onboarded:       false, // will be updated to true after training succeeds below
       });
 
-      // 5. Upload logo — token is now in localStorage so auth header is set.
+      // 5. Save locations — token is now in localStorage so auth header is set.
+      //    Skipped on retry — locations were already saved.
+      if (!companyId && locations.length > 0) {
+        await companyAPI.updateLocations(locations);
+      }
+
+      // 6. Upload logo — token is now in localStorage so auth header is set.
       //    Skipped on retry (logo was already uploaded in the first attempt).
       if (logoFile && !companyId) {
         await onboardingAPI.uploadLogo(logoFile);
       }
 
-      // 6. Upload documents one by one.
+      // 7. Upload documents one by one.
       //    Skipped on retry — documents were already uploaded.
       if (!companyId) {
         for (const doc of docs) {

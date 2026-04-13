@@ -7,6 +7,7 @@ CRUD for company documents — USP, Compliances, Policies, Marketing Goals, etc.
 Used by Study Coordinator (My Company) and Ethics Manager (Document Updation).
 """
 
+import asyncio
 import os
 import mimetypes
 import logging
@@ -56,6 +57,14 @@ ALLOWED_DOC_TYPES = {
     "text/plain",
     "text/markdown",
 }
+ALLOWED_DOC_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".md"}
+
+
+def _is_allowed_doc(file: UploadFile) -> bool:
+    """Accept by content-type (ignoring charset param) OR by file extension."""
+    base_ct = (file.content_type or "").split(";")[0].strip()
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    return base_ct in ALLOWED_DOC_TYPES or ext in ALLOWED_DOC_EXTENSIONS
 
 
 async def _user_from_query_token(
@@ -127,7 +136,7 @@ async def upload_document(
     Curator + Reviewer skills receive actual document text.
     Re-trains AI skills in the background after saving.
     """
-    if file.content_type not in ALLOWED_DOC_TYPES:
+    if not _is_allowed_doc(file):
         raise HTTPException(
             status_code=400,
             detail="Invalid file type. Accepted: PDF, DOCX, DOC, TXT, MD.",
@@ -140,7 +149,7 @@ async def upload_document(
     )
 
     disk_path = url_to_disk_path(file_path, BACKEND_ROOT)
-    content   = extract_text(disk_path)
+    content   = await asyncio.to_thread(extract_text, disk_path)
 
     doc = CompanyDocument(
         company_id=user.company_id,

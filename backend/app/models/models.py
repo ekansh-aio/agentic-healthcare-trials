@@ -81,12 +81,13 @@ class Company(Base):
     created_at = Column(DateTime, default=_now)
     onboarded  = Column(Boolean, default=False)
 
-    users              = relationship("User", back_populates="company", cascade="all, delete-orphan")
-    documents          = relationship("CompanyDocument", back_populates="company", cascade="all, delete-orphan")
-    advertisements     = relationship("Advertisement", back_populates="company", cascade="all, delete-orphan")
-    skills             = relationship("SkillConfig", back_populates="company", cascade="all, delete-orphan")
-    reinforcement_logs = relationship("ReinforcementLog", back_populates="company", cascade="all, delete-orphan")
-    brand_kit          = relationship("BrandKit", back_populates="company", uselist=False, cascade="all, delete-orphan")
+    users               = relationship("User", back_populates="company", cascade="all, delete-orphan")
+    documents           = relationship("CompanyDocument", back_populates="company", cascade="all, delete-orphan")
+    advertisements      = relationship("Advertisement", back_populates="company", cascade="all, delete-orphan")
+    skills              = relationship("SkillConfig", back_populates="company", cascade="all, delete-orphan")
+    reinforcement_logs  = relationship("ReinforcementLog", back_populates="company", cascade="all, delete-orphan")
+    brand_kit           = relationship("BrandKit", back_populates="company", uselist=False, cascade="all, delete-orphan")
+    platform_connections = relationship("PlatformConnection", back_populates="company", cascade="all, delete-orphan")
 
 
 # ─── User ─────────────────────────────────────────────────────────────────────
@@ -371,8 +372,8 @@ class PlatformConnection(Base):
     )
 
     id               = Column(String, primary_key=True, default=_uuid)
-    company_id       = Column(String, ForeignKey("companies.id"), nullable=False)
-    user_id          = Column(String, ForeignKey("users.id"), nullable=False)
+    company_id       = Column(String, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    user_id          = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     platform         = Column(String(32), nullable=False)       # "meta"
     access_token     = Column(Text, nullable=False)             # long-lived user access token
     token_expires_at = Column(DateTime, nullable=True)          # None = never expires
@@ -383,6 +384,8 @@ class PlatformConnection(Base):
     meta_user_id     = Column(String(128), nullable=True)       # Meta user UID
     created_at       = Column(DateTime, default=_now)
     updated_at       = Column(DateTime, default=_now, onupdate=_now)
+
+    company          = relationship("Company", back_populates="platform_connections")
 
 
 # ─── Call Transcripts ─────────────────────────────────────────────────────────

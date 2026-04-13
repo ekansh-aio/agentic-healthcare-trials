@@ -180,10 +180,10 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     const role = JSON.parse(localStorage.getItem("user") || "{}").role;
-    const requests = [adsAPI.list(), role === "study_coordinator" ? usersAPI.list() : Promise.resolve([])];
-    Promise.all(requests)
+    const adsReq   = adsAPI.list().catch(() => []);
+    const usersReq = role === "study_coordinator" ? usersAPI.list().catch(() => []) : Promise.resolve([]);
+    Promise.all([adsReq, usersReq])
       .then(([a, u]) => { setAds(a); setUsers(u); })
-      .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
 
