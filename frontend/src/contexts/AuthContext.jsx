@@ -73,6 +73,8 @@ export function AuthProvider({ children }) {
       companyId: data.company_id,
       companyName: data.company_name,
       companyIndustry: data.company_industry || null,
+      fullName: data.full_name || "",
+      email: data.email || "",
       token: data.access_token,
       onboarded: data.onboarded ?? false,
     };
@@ -119,6 +121,8 @@ export function AuthProvider({ children }) {
     companyId: user?.companyId,
     companyName: user?.companyName,
     companyIndustry: user?.companyIndustry || null,
+    fullName: user?.fullName || "",
+    email: user?.email || "",
     onboarded: user?.onboarded ?? true,  // default true for sessions predating this field
   };
 

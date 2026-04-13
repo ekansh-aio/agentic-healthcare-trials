@@ -1,19 +1,25 @@
 /**
  * Step 1 — Admin Account
  * Collects name, email, password for the primary admin user.
- * Validates fields locally before advancing to step 2.
- * Actual registration is deferred to Step 4.
+ * Validates fields locally, then checks email availability via API before advancing.
+ * Actual full registration is deferred to Step 5 (handleTrain).
  *
  * Props:
  *   form         {object}   — shared form state { admin_name, admin_email, admin_password }
  *   updateForm   {function} — (key, value) => void
  *   loading      {boolean}  — unused here, kept for prop-shape consistency
  *   onBack       {function} — navigate back to step 0
- *   onRegister   {function} — advances to step 2 (actual registration deferred to Step 4)
- *   setError     {function} — surface validation errors to parent
+ *   onRegister   {function} — advances to step 2
+ *   setError     {function} — surface errors to parent (shown in parent's error banner)
  */
+import { useState } from "react";
+import { authAPI } from "../../../services/api";
+import { Loader2 } from "lucide-react";
+
 export default function AdminAccountStep({ form, updateForm, loading, onBack, onRegister, setError }) {
-  const handleRegister = () => {
+  const [checking, setChecking] = useState(false);
+
+  const handleRegister = async () => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
     if (!form.admin_name.trim()) {
@@ -29,7 +35,21 @@ export default function AdminAccountStep({ form, updateForm, loading, onBack, on
       return;
     }
 
+    // Check email availability before advancing
+    setChecking(true);
     setError("");
+    try {
+      await authAPI.checkEmail(form.admin_email);
+    } catch (err) {
+      if (err.message === "email_exists") {
+        setError("An account with this email already exists. Please sign in instead.");
+      } else {
+        setError(err.message || "Unable to verify email. Please try again.");
+      }
+      setChecking(false);
+      return;
+    }
+    setChecking(false);
     onRegister();
   };
 
@@ -64,17 +84,21 @@ export default function AdminAccountStep({ form, updateForm, loading, onBack, on
       />
 
       <div className="flex gap-3 pt-1">
-        <button onClick={onBack} className="btn--ghost flex-1 py-3">
+        <button onClick={onBack} className="btn--ghost flex-1 py-3" disabled={checking}>
           ← Back
         </button>
         <button
           onClick={handleRegister}
-          disabled={!form.admin_email || !form.admin_password || !form.admin_name}
+          disabled={checking || !form.admin_email || !form.admin_password || !form.admin_name}
           className="btn--primary flex-1 py-3"
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}
         >
-          Save & Continue →
+          {checking
+            ? <><Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Checking…</>
+            : "Save & Continue →"}
         </button>
       </div>
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 }

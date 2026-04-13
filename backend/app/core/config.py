@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     ELEVENLABS_VOICE_ID: str = "EXAVITQu4vr4xnSDxMaL"  # Default: Rachel
     ELEVENLABS_PHONE_NUMBER_ID: Optional[str] = None  # Phone number ID for outbound calls
 
+    # Email (SMTP) — leave blank to log OTP to console instead of sending
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""          # defaults to SMTP_USER if blank
+
     # File storage
     UPLOAD_DIR: str = "./uploads"
     OUTPUT_DIR: str = "./outputs"

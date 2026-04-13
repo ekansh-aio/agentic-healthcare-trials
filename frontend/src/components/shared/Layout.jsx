@@ -30,14 +30,17 @@
  *                           analytics or dashboard page.
  */
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
+import ReactDOM from "react-dom";
 import { Navigate, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../../contexts/AuthContext";
 import { useGeneration, GEN_STEPS } from "../../contexts/GenerationContext";
+import { authAPI } from "../../services/api";
 import {
   LayoutDashboard, Users, FileText, BarChart3,
   LogOut, Shield, Eye, Megaphone, Globe, Bot,
   Rocket, Share2, Sparkles, X, CheckCircle2, Activity, Menu,
+  KeyRound, Mail, Lock, ChevronRight, Loader2, AlertCircle,
 } from "lucide-react";
 
 // ─── RoleGuardedRoute ─────────────────────────────────────────────────────────
@@ -89,8 +92,8 @@ const SIDEBAR_LINKS_BY_ROLE = {
   ],
   publisher: [
     { label: "Dashboard",   icon: LayoutDashboard, path: "/publisher" },
-    { label: "Deploy",      icon: Rocket,          path: "/publisher/deploy" },
-    { label: "Distribute",  icon: Share2,          path: "/publisher/distribute" },
+    { label: "Publish Website", icon: Rocket,  path: "/publisher/deploy" },
+    { label: "Upload Ads",      icon: Share2,  path: "/publisher/distribute" },
     { label: "Analytics",   icon: BarChart3,       path: "/publisher/analytics" },
   ],
 };
@@ -98,10 +101,283 @@ const SIDEBAR_LINKS_BY_ROLE = {
 // ─── AppSidebar ───────────────────────────────────────────────────────────────
 // Already included inside <PageWithSidebar> — no need to add manually.
 
+// ─── Profile Modal ────────────────────────────────────────────────────────────
+function ProfileModal({ onClose }) {
+  const { fullName, email, role } = useAuth();
+  // view: "profile" | "sending" | "verify" | "success"
+  const [view,        setView]        = useState("profile");
+  const [code,        setCode]        = useState("");
+  const [newPw,       setNewPw]       = useState("");
+  const [confirmPw,   setConfirmPw]   = useState("");
+  const [error,       setError]       = useState("");
+  const [loading,     setLoading]     = useState(false);
+  const codeRef = useRef(null);
+
+  useEffect(() => {
+    if (view === "verify") setTimeout(() => codeRef.current?.focus(), 50);
+  }, [view]);
+
+  const handleSendCode = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      await authAPI.requestPasswordChange();
+      setView("verify");
+    } catch (err) {
+      setError(err.message || "Failed to send code. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (newPw.length < 8)        { setError("Password must be at least 8 characters."); return; }
+    if (newPw !== confirmPw)     { setError("Passwords don't match."); return; }
+    if (code.length !== 6)       { setError("Enter the 6-digit code."); return; }
+    setLoading(true);
+    setError("");
+    try {
+      await authAPI.confirmPasswordChange(code, newPw);
+      setView("success");
+    } catch (err) {
+      setError(err.message || "Invalid or expired code.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const initials = fullName ? fullName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() : "U";
+
+  return ReactDOM.createPortal(
+    <>
+      {/* Backdrop — click outside to close */}
+      <div
+        onClick={onClose}
+        style={{ position: "fixed", inset: 0, zIndex: 1000 }}
+      />
+
+      {/* Modal — pops out to the right of the sidebar (w-60 = 240px) */}
+      <div style={{
+        position: "fixed", bottom: 16, left: 256, zIndex: 1001,
+        width: 320,
+        background: "var(--color-card-bg)",
+        border: "1px solid var(--color-card-border)",
+        borderRadius: 14,
+        boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
+        overflow: "hidden",
+        animation: "slideUp 0.18s ease",
+      }}>
+        <style>{`
+          @keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+          @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+        `}</style>
+
+        {/* Header */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "14px 16px 12px",
+          borderBottom: "1px solid var(--color-card-border)",
+        }}>
+          <p style={{ margin: 0, fontSize: "0.85rem", fontWeight: 700, color: "var(--color-input-text)" }}>
+            {view === "profile" ? "My Profile" : view === "success" ? "Password Updated" : "Change Password"}
+          </p>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-muted)", display: "flex", padding: 2 }}>
+            <X size={15} />
+          </button>
+        </div>
+
+        <div style={{ padding: "16px" }}>
+
+          {/* ── Profile view ── */}
+          {view === "profile" && (
+            <>
+              {/* Avatar + info */}
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+                <div style={{
+                  width: 48, height: 48, borderRadius: "50%", flexShrink: 0,
+                  background: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.15)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: "1rem", fontWeight: 700, color: "var(--color-sidebar-text-active)",
+                  border: "2px solid rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.3)",
+                }}>
+                  {initials}
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700, color: "var(--color-input-text)" }}>{fullName || "User"}</p>
+                  <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "var(--color-muted)", textTransform: "capitalize" }}>{role?.replace(/_/g, " ")}</p>
+                </div>
+              </div>
+
+              {/* Email row */}
+              <div style={{
+                display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+                borderRadius: 8, background: "var(--color-page-bg)",
+                border: "1px solid var(--color-card-border)", marginBottom: 12,
+              }}>
+                <Mail size={13} style={{ color: "var(--color-muted)", flexShrink: 0 }} />
+                <span style={{ fontSize: "0.8rem", color: "var(--color-sidebar-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {email || "—"}
+                </span>
+              </div>
+
+              {/* Change password CTA */}
+              <button
+                onClick={() => setView("sending")}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "10px 12px", borderRadius: 8, cursor: "pointer",
+                  background: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.08)",
+                  border: "1px solid rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.2)",
+                  color: "var(--color-sidebar-text-active)", fontSize: "0.82rem", fontWeight: 600,
+                  transition: "all 0.15s",
+                }}
+              >
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <KeyRound size={14} /> Change Password
+                </span>
+                <ChevronRight size={14} />
+              </button>
+            </>
+          )}
+
+          {/* ── Sending OTP view ── */}
+          {view === "sending" && (
+            <div style={{ textAlign: "center" }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: "50%", margin: "0 auto 14px",
+                background: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.1)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <Mail size={20} style={{ color: "var(--color-sidebar-text-active)" }} />
+              </div>
+              <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: "0.88rem", color: "var(--color-input-text)" }}>
+                Verify via email
+              </p>
+              <p style={{ margin: "0 0 18px", fontSize: "0.78rem", color: "var(--color-muted)", lineHeight: 1.5 }}>
+                We'll send a 6-digit code to<br />
+                <strong style={{ color: "var(--color-sidebar-text)" }}>{email}</strong>
+              </p>
+              {error && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", borderRadius: 7, marginBottom: 12, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
+                  <AlertCircle size={13} style={{ color: "#f87171", flexShrink: 0 }} />
+                  <p style={{ margin: 0, fontSize: "0.76rem", color: "#f87171" }}>{error}</p>
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => { setView("profile"); setError(""); }} className="btn--ghost" style={{ flex: 1, fontSize: "0.8rem" }}>
+                  Back
+                </button>
+                <button
+                  onClick={handleSendCode}
+                  disabled={loading}
+                  className="btn--primary"
+                  style={{ flex: 1, fontSize: "0.8rem", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: loading ? 0.7 : 1 }}
+                >
+                  {loading ? <><Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> Sending…</> : "Send Code"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Verify + new password view ── */}
+          {view === "verify" && (
+            <div>
+              <p style={{ margin: "0 0 14px", fontSize: "0.8rem", color: "var(--color-muted)", lineHeight: 1.5 }}>
+                Code sent to <strong style={{ color: "var(--color-sidebar-text)" }}>{email}</strong>. Enter it below with your new password.
+              </p>
+
+              <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 600, color: "var(--color-sidebar-text)", marginBottom: 5 }}>
+                Verification Code
+              </label>
+              <input
+                ref={codeRef}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="6-digit code"
+                className="field-input"
+                style={{ letterSpacing: "0.25em", textAlign: "center", fontSize: "1.1rem", marginBottom: 10 }}
+                maxLength={6}
+              />
+
+              <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 600, color: "var(--color-sidebar-text)", marginBottom: 5 }}>
+                New Password
+              </label>
+              <input
+                type="password"
+                value={newPw}
+                onChange={(e) => setNewPw(e.target.value)}
+                placeholder="Min. 8 characters"
+                className="field-input"
+                style={{ marginBottom: 10 }}
+              />
+
+              <label style={{ display: "block", fontSize: "0.72rem", fontWeight: 600, color: "var(--color-sidebar-text)", marginBottom: 5 }}>
+                Confirm Password
+              </label>
+              <input
+                type="password"
+                value={confirmPw}
+                onChange={(e) => setConfirmPw(e.target.value)}
+                placeholder="Repeat new password"
+                className="field-input"
+                style={{ marginBottom: 12 }}
+              />
+
+              {error && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", borderRadius: 7, marginBottom: 12, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
+                  <AlertCircle size={13} style={{ color: "#f87171", flexShrink: 0 }} />
+                  <p style={{ margin: 0, fontSize: "0.76rem", color: "#f87171" }}>{error}</p>
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => { setView("sending"); setError(""); setCode(""); }} className="btn--ghost" style={{ flex: 1, fontSize: "0.8rem" }} disabled={loading}>
+                  Resend
+                </button>
+                <button
+                  onClick={handleConfirm}
+                  disabled={loading || code.length < 6 || newPw.length < 8}
+                  className="btn--primary"
+                  style={{ flex: 1, fontSize: "0.8rem", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: (loading || code.length < 6 || newPw.length < 8) ? 0.6 : 1 }}
+                >
+                  {loading ? <><Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> Updating…</> : <><Lock size={13} /> Update</>}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Success view ── */}
+          {view === "success" && (
+            <div style={{ textAlign: "center", padding: "8px 0 4px" }}>
+              <div style={{
+                width: 48, height: 48, borderRadius: "50%", margin: "0 auto 14px",
+                background: "rgba(34,197,94,0.1)", display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                <CheckCircle2 size={22} style={{ color: "#22c55e" }} />
+              </div>
+              <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: "0.9rem", color: "var(--color-input-text)" }}>Password updated!</p>
+              <p style={{ margin: "0 0 18px", fontSize: "0.78rem", color: "var(--color-muted)" }}>
+                Your new password is active.
+              </p>
+              <button onClick={onClose} className="btn--primary" style={{ width: "100%", fontSize: "0.82rem" }}>
+                Done
+              </button>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </>,
+    document.body,
+  );
+}
+
+
 export function AppSidebar({ isOpen, onClose }) {
-  const { role, logout } = useAuth();
+  const { role, logout, fullName, companyName } = useAuth();
   const location = useLocation();
   const navLinks = SIDEBAR_LINKS_BY_ROLE[role] || [];
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const handleNavClick = () => {
     if (onClose) onClose();
@@ -154,11 +430,46 @@ export function AppSidebar({ isOpen, onClose }) {
         })}
       </nav>
 
+      {/* User profile strip — clickable */}
+      <button
+        onClick={() => setProfileOpen(true)}
+        style={{
+          width: "100%", padding: "12px 16px", background: "none", border: "none",
+          borderTop: "1px solid var(--color-sidebar-border)",
+          display: "flex", alignItems: "center", gap: 10,
+          cursor: "pointer", textAlign: "left",
+          transition: "background 0.15s",
+        }}
+        onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.05)"}
+        onMouseLeave={(e) => e.currentTarget.style.background = "none"}
+      >
+        <div style={{
+          width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+          backgroundColor: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.18)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: "0.75rem", fontWeight: 700, color: "var(--color-sidebar-text-active)",
+        }}>
+          {fullName ? fullName.charAt(0).toUpperCase() : role?.charAt(0).toUpperCase()}
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <p style={{ fontSize: "0.78rem", fontWeight: 600, color: "#e5e7eb", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {fullName || companyName || "User"}
+          </p>
+          <p style={{ fontSize: "0.68rem", color: "var(--color-sidebar-text)", margin: 0, textTransform: "capitalize" }}>
+            {role?.replace(/_/g, " ")}
+          </p>
+        </div>
+        <ChevronRight size={13} style={{ color: "var(--color-muted)", flexShrink: 0 }} />
+      </button>
+
       {/* Sign-out */}
       <button onClick={logout} className="sidebar__signout">
         <LogOut size={15} />
         Sign Out
       </button>
+
+      {/* Profile modal */}
+      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
     </aside>
   );
 }

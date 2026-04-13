@@ -19,7 +19,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { X } from "lucide-react";
 
-import { onboardingAPI, authAPI, brandKitAPI } from "../../services/api";
+import { onboardingAPI, authAPI, brandKitAPI, companyAPI } from "../../services/api";
 import { applyBrandTheme } from "../../services/theme";
 
 import { useAuth } from "../../contexts/AuthContext";
@@ -177,7 +177,13 @@ export default function OnboardingPage() {
         }
       }
 
-      // 7. Create brand kit — only if the user made a selection or uploaded a PDF.
+      // 7. Save operating locations — only if the user added any.
+      //    Skipped on retry — locations were already saved.
+      if (!companyId && locations.length > 0) {
+        await companyAPI.updateLocations(locations);
+      }
+
+      // 8. Create brand kit — only if the user made a selection or uploaded a PDF.
       //    If the user skipped, all color fields are null and there is nothing
       //    meaningful to save, so we skip the API call entirely and leave the
       //    platform running on its default theme.
@@ -200,7 +206,7 @@ export default function OnboardingPage() {
         }
       }
 
-      // 8. Trigger AI skill initialization — generates customized Curator + Reviewer skills.
+      // 9. Trigger AI skill initialization — generates customized Curator + Reviewer skills.
       //    This is the step that gates account activation. Always run on every attempt.
       await onboardingAPI.triggerTraining();
 

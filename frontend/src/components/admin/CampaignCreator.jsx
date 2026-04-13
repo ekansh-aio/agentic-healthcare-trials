@@ -547,12 +547,16 @@ const CAMPAIGN_GROUPS = [
 ];
 
 const PLATFORMS = ["Google Ads", "Meta/Instagram", "LinkedIn", "Twitter/X", "YouTube", "TikTok", "Email"];
+// Only Meta/Instagram is live — all others are coming soon
+const ACTIVE_PLATFORMS = new Set(["Meta/Instagram"]);
 
 // Shown as a branch when SMM is selected in Step 1
 const SOCIAL_PLATFORMS = [
   "Meta Ads", "LinkedIn", "Twitter / X",
   "YouTube", "TikTok", "Snapchat", "Pinterest",
 ];
+// Only Meta Ads is live for social
+const ACTIVE_SOCIAL_PLATFORMS = new Set(["Meta Ads"]);
 
 export default function CampaignCreator() {
   const navigate    = useNavigate();
@@ -1019,22 +1023,37 @@ export default function CampaignCreator() {
                           </p>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                             {SOCIAL_PLATFORMS.map((sp) => {
-                              const spActive = form.social_platforms.includes(sp);
+                              const isLive   = ACTIVE_SOCIAL_PLATFORMS.has(sp);
+                              const spActive = isLive && form.social_platforms.includes(sp);
                               return (
                                 <button
                                   key={sp}
                                   type="button"
-                                  onClick={(e) => { e.stopPropagation(); toggleSocialPlatform(sp); }}
+                                  onClick={(e) => { if (!isLive) return; e.stopPropagation(); toggleSocialPlatform(sp); }}
+                                  disabled={!isLive}
+                                  title={isLive ? undefined : "Coming soon"}
                                   style={{
                                     padding: "5px 12px", borderRadius: 999, fontSize: "0.78rem",
-                                    fontWeight: spActive ? 600 : 400, cursor: "pointer",
+                                    fontWeight: spActive ? 600 : 400,
+                                    cursor: isLive ? "pointer" : "not-allowed",
+                                    opacity: isLive ? 1 : 0.45,
                                     border: `1.5px solid ${spActive ? "var(--color-accent)" : "var(--color-card-border)"}`,
                                     backgroundColor: spActive ? "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.12)" : "transparent",
                                     color: spActive ? "var(--color-accent)" : "var(--color-sidebar-text)",
                                     transition: "all 0.15s",
+                                    position: "relative",
                                   }}
                                 >
                                   {sp}
+                                  {!isLive && (
+                                    <span style={{
+                                      position: "absolute", top: -6, right: -4,
+                                      fontSize: "0.55rem", fontWeight: 700, lineHeight: 1,
+                                      backgroundColor: "var(--color-card-bg)", color: "var(--color-muted)",
+                                      border: "1px solid var(--color-card-border)",
+                                      borderRadius: 4, padding: "1px 4px",
+                                    }}>soon</span>
+                                  )}
                                 </button>
                               );
                             })}
@@ -1147,24 +1166,39 @@ export default function CampaignCreator() {
                     </label>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
                       {PLATFORMS.map((p) => {
-                        const active = form.platforms.includes(p);
+                        const isLive = ACTIVE_PLATFORMS.has(p);
+                        const active = isLive && form.platforms.includes(p);
                         return (
                           <button
                             key={p}
                             type="button"
-                            onClick={() => togglePlatform(p)}
+                            onClick={() => { if (isLive) togglePlatform(p); }}
+                            disabled={!isLive}
+                            title={isLive ? undefined : "Coming soon"}
                             style={{
                               padding: "5px 14px", borderRadius: 999, fontSize: "0.8rem",
-                              fontWeight: active ? 600 : 400, cursor: "pointer",
+                              fontWeight: active ? 600 : 400,
+                              cursor: isLive ? "pointer" : "not-allowed",
+                              opacity: isLive ? 1 : 0.45,
                               border: `1.5px solid ${active ? "var(--color-accent)" : "var(--color-card-border)"}`,
                               backgroundColor: active
                                 ? "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.12)"
                                 : "transparent",
                               color: active ? "var(--color-accent)" : "var(--color-sidebar-text)",
                               transition: "all 0.15s",
+                              position: "relative",
                             }}
                           >
                             {p}
+                            {!isLive && (
+                              <span style={{
+                                position: "absolute", top: -6, right: -4,
+                                fontSize: "0.55rem", fontWeight: 700, lineHeight: 1,
+                                backgroundColor: "var(--color-card-bg)", color: "var(--color-muted)",
+                                border: "1px solid var(--color-card-border)",
+                                borderRadius: 4, padding: "1px 4px",
+                              }}>soon</span>
+                            )}
                           </button>
                         );
                       })}

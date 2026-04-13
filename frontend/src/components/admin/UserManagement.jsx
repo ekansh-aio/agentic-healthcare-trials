@@ -10,6 +10,7 @@
 import React, { useState, useEffect } from "react";
 import { PageWithSidebar, SectionCard } from "../shared/Layout";
 import { usersAPI } from "../../services/api";
+import { useAuth } from "../../contexts/AuthContext";
 import { UserPlus, Shield, Eye, Send, Settings, UserMinus, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 
 const ROLES = [
@@ -22,14 +23,16 @@ const ROLES = [
 const EMPTY_FORM = { email: "", password: "", full_name: "", role: "project_manager" };
 
 export default function UserManagement() {
-  const [users,      setUsers]      = useState([]);
-  const [showForm,   setShowForm]   = useState(false);
-  const [form,       setForm]       = useState(EMPTY_FORM);
-  const [loading,    setLoading]    = useState(false);
-  const [fetchError, setFetchError] = useState(null);
-  const [formError,  setFormError]  = useState(null);
-  const [formOk,     setFormOk]     = useState(false);
-  const [deactivating, setDeactivating] = useState(null); // userId being deactivated
+  const { user: currentUser } = useAuth();
+  const [users,           setUsers]           = useState([]);
+  const [showForm,        setShowForm]        = useState(false);
+  const [form,            setForm]            = useState(EMPTY_FORM);
+  const [loading,         setLoading]         = useState(false);
+  const [fetchError,      setFetchError]      = useState(null);
+  const [formError,       setFormError]       = useState(null);
+  const [formOk,          setFormOk]          = useState(false);
+  const [deactivating,    setDeactivating]    = useState(null);   // userId being deactivated
+  const [confirmTarget,   setConfirmTarget]   = useState(null);   // userId awaiting confirmation
 
   useEffect(() => {
     usersAPI.list()
@@ -59,20 +62,20 @@ export default function UserManagement() {
   };
 
   const handleDeactivate = async (userId) => {
+    setConfirmTarget(null);
     setDeactivating(userId);
     try {
       const updated = await usersAPI.deactivate(userId);
       setUsers((p) => p.map((u) => u.id === userId ? updated : u));
     } catch (err) {
-      // show inline — no alert
       setFetchError(err.message || "Failed to deactivate user.");
-      setTimeout(() => setFetchError(null), 5000);
+      setTimeout(() => setFetchError(null), 6000);
     } finally {
       setDeactivating(null);
     }
   };
 
-  const openForm = () => { setShowForm(true); setFormError(null); setFormOk(false); };
+  const openForm  = () => { setShowForm(true); setFormError(null); setFormOk(false); };
   const closeForm = () => { setShowForm(false); setForm(EMPTY_FORM); setFormError(null); };
 
   const isValid = form.full_name.trim() && form.email.trim() && form.password.length >= 8;
@@ -207,71 +210,105 @@ export default function UserManagement() {
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {users.map((u) => (
-              <div key={u.id} style={{
-                display:         "flex",
-                alignItems:      "center",
-                justifyContent:  "space-between",
-                padding:         "12px 16px",
-                borderRadius:    "10px",
-                border:          "1px solid var(--color-card-border)",
-                backgroundColor: "var(--color-card-bg)",
-                opacity:         u.is_active ? 1 : 0.55,
-              }}>
-                {/* Left: avatar + name + email */}
-                <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-                  <div className="user-avatar">{u.full_name?.charAt(0)?.toUpperCase()}</div>
-                  <div style={{ minWidth: 0 }}>
-                    <p className="table-row__title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.full_name}</p>
-                    <p className="table-row__meta">{u.email}</p>
-                  </div>
-                </div>
-
-                {/* Right: role badge + deactivate */}
-                <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-                  <div style={{
-                    display:         "flex",
-                    alignItems:      "center",
-                    gap:             "6px",
-                    padding:         "4px 10px",
-                    borderRadius:    "20px",
-                    border:          "1px solid var(--color-card-border)",
-                    backgroundColor: "var(--color-page-bg)",
-                  }}>
-                    <span style={{
-                      width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-                      backgroundColor: u.is_active ? "var(--color-accent)" : "#f87171",
-                      boxShadow: u.is_active ? "0 0 0 2px var(--color-accent-subtle)" : "none",
-                    }} />
-                    <span style={{ fontSize: "0.75rem", fontWeight: 500, color: "var(--color-input-text)", textTransform: "capitalize", whiteSpace: "nowrap" }}>
-                      {u.role?.replace(/_/g, " ")}
-                    </span>
+            {users.map((u) => {
+              const isSelf   = u.id === currentUser?.id;
+              const isTarget = confirmTarget === u.id;
+              return (
+                <div key={u.id} style={{
+                  display:         "flex",
+                  alignItems:      "center",
+                  justifyContent:  "space-between",
+                  padding:         "12px 16px",
+                  borderRadius:    "10px",
+                  border:          "1px solid var(--color-card-border)",
+                  backgroundColor: "var(--color-card-bg)",
+                  opacity:         u.is_active ? 1 : 0.55,
+                }}>
+                  {/* Left: avatar + name + email */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                    <div className="user-avatar">{u.full_name?.charAt(0)?.toUpperCase()}</div>
+                    <div style={{ minWidth: 0 }}>
+                      <p className="table-row__title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {u.full_name}{isSelf && <span style={{ fontSize: "0.68rem", marginLeft: 6, color: "var(--color-accent)", fontWeight: 600 }}>You</span>}
+                      </p>
+                      <p className="table-row__meta">{u.email}</p>
+                    </div>
                   </div>
 
-                  {u.is_active && (
-                    <button
-                      onClick={() => handleDeactivate(u.id)}
-                      disabled={deactivating === u.id}
-                      title="Deactivate user"
-                      style={{
-                        display: "flex", alignItems: "center", gap: 5,
-                        padding: "5px 10px", borderRadius: 7, fontSize: "0.75rem", fontWeight: 500,
-                        border: "1px solid rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.06)",
-                        color: "#f87171", cursor: "pointer", opacity: deactivating === u.id ? 0.6 : 1,
-                      }}
-                    >
-                      {deactivating === u.id
-                        ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />
-                        : <UserMinus size={12} />}
-                      Deactivate
-                    </button>
-                  )}
-                  {!u.is_active && (
-                    <span style={{ fontSize: "0.72rem", color: "#f87171", fontWeight: 500 }}>Inactive</span>
-                  )}
+                  {/* Right: role badge + deactivate */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                    <div style={{
+                      display:         "flex",
+                      alignItems:      "center",
+                      gap:             "6px",
+                      padding:         "4px 10px",
+                      borderRadius:    "20px",
+                      border:          "1px solid var(--color-card-border)",
+                      backgroundColor: "var(--color-page-bg)",
+                    }}>
+                      <span style={{
+                        width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+                        backgroundColor: u.is_active ? "var(--color-accent)" : "#f87171",
+                        boxShadow: u.is_active ? "0 0 0 2px var(--color-accent-subtle)" : "none",
+                      }} />
+                      <span style={{ fontSize: "0.75rem", fontWeight: 500, color: "var(--color-input-text)", textTransform: "capitalize", whiteSpace: "nowrap" }}>
+                        {u.role?.replace(/_/g, " ")}
+                      </span>
+                    </div>
+
+                    {u.is_active && !isSelf && (
+                      isTarget ? (
+                        /* Confirmation row */
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ fontSize: "0.72rem", color: "#f87171", fontWeight: 500 }}>Deactivate?</span>
+                          <button
+                            onClick={() => handleDeactivate(u.id)}
+                            disabled={deactivating === u.id}
+                            style={{
+                              padding: "4px 10px", borderRadius: 6, fontSize: "0.72rem", fontWeight: 600,
+                              border: "1px solid rgba(239,68,68,0.5)", backgroundColor: "rgba(239,68,68,0.12)",
+                              color: "#f87171", cursor: "pointer",
+                            }}
+                          >
+                            {deactivating === u.id
+                              ? <Loader2 size={11} style={{ animation: "spin 1s linear infinite" }} />
+                              : "Yes, deactivate"}
+                          </button>
+                          <button
+                            onClick={() => setConfirmTarget(null)}
+                            style={{
+                              padding: "4px 10px", borderRadius: 6, fontSize: "0.72rem", fontWeight: 500,
+                              border: "1px solid var(--color-card-border)", backgroundColor: "transparent",
+                              color: "var(--color-sidebar-text)", cursor: "pointer",
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmTarget(u.id)}
+                          title="Deactivate user"
+                          style={{
+                            display: "flex", alignItems: "center", gap: 5,
+                            padding: "5px 10px", borderRadius: 7, fontSize: "0.75rem", fontWeight: 500,
+                            border: "1px solid rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.06)",
+                            color: "#f87171", cursor: "pointer",
+                          }}
+                        >
+                          <UserMinus size={12} />
+                          Deactivate
+                        </button>
+                      )
+                    )}
+
+                    {!u.is_active && (
+                      <span style={{ fontSize: "0.72rem", color: "#f87171", fontWeight: 500 }}>Inactive</span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </SectionCard>

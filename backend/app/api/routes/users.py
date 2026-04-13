@@ -9,7 +9,7 @@ Only Admin can create/manage users.
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from typing import List
 
 from app.db.database import get_db
@@ -61,12 +61,34 @@ async def deactivate_user(
     admin: User = Depends(require_roles([UserRole.STUDY_COORDINATOR])),
     db: AsyncSession = Depends(get_db),
 ):
-    """Deactivate a user."""
+    """Deactivate a user. Enforces: no self-deactivation; at least 1 active SC must remain."""
+    if admin.id == user_id:
+        raise HTTPException(status_code=422, detail="You cannot deactivate your own account.")
+
     result = await db.execute(
         select(User).where(User.id == user_id, User.company_id == admin.company_id)
     )
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # If the target is a Study Coordinator, ensure at least one active SC remains after deactivation.
+    if user.role == UserRole.STUDY_COORDINATOR:
+        count_result = await db.execute(
+            select(func.count()).where(
+                User.company_id == admin.company_id,
+                User.role == UserRole.STUDY_COORDINATOR,
+                User.is_active == True,
+            )
+        )
+        active_sc_count = count_result.scalar_one()
+        if active_sc_count <= 1:
+            raise HTTPException(
+                status_code=422,
+                detail="Cannot deactivate the last active Study Coordinator.",
+            )
+
     user.is_active = False
+    # Scramble the email so the address can be re-registered in future.
+    user.email = f"deactivated_{user.id}@deactivated.invalid"
     return user
