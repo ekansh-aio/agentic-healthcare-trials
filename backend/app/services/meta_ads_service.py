@@ -255,12 +255,13 @@ class MetaAdsService:
         name: str,
         daily_budget_cents: int,
         targeting_countries: list[str],
+        page_id: str,
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
     ) -> str:
         """Create an ad set (PAUSED) and return its ID."""
         targeting = {
-            "geo_locations": {"countries": targeting_countries or ["US"]},
+            "geo_locations": {"countries": targeting_countries or ["AU"]},
             "age_min": 18,
             "age_max": 65,
         }
@@ -274,6 +275,9 @@ class MetaAdsService:
             "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
             "destination_type": "WEBSITE",
             "targeting": json.dumps(targeting),
+            # Links this ad set to the Facebook Page — eliminates the manual
+            # "which page?" prompt in Meta Ads Manager when activating.
+            "promoted_object": json.dumps({"page_id": page_id}),
             "status": "PAUSED",
         }
         if start_time:
@@ -286,6 +290,24 @@ class MetaAdsService:
 
     # ─── Step 4: Create Ad Creative ───────────────────────────────────────────
 
+    async def fetch_instagram_actor_id(self, page_id: str) -> Optional[str]:
+        """
+        Return the Instagram actor ID connected to a Facebook Page, or None.
+        Used to pre-fill the Instagram placement so Meta Ads Manager doesn't
+        ask for it manually when activating the campaign.
+        """
+        try:
+            body = await self._get(
+                page_id,
+                params={"fields": "instagram_accounts{id}"},
+            )
+            accounts = (body.get("instagram_accounts") or {}).get("data", [])
+            if accounts:
+                return accounts[0]["id"]
+        except Exception as exc:
+            logger.debug("Could not fetch Instagram actor for page %s: %s", page_id, exc)
+        return None
+
     async def create_creative(
         self,
         name: str,
@@ -295,22 +317,62 @@ class MetaAdsService:
         body: str,
         cta_type: str,
         link_url: str,
+        instagram_actor_id: Optional[str] = None,
+        display_url: Optional[str] = None,
+        addon_type: Optional[str] = None,   # "whatsapp" | "phone" | None
+        addon_phone: Optional[str] = None,  # E.164 phone number
     ) -> str:
-        """Create an ad creative and return its ID."""
-        object_story_spec = {
-            "page_id": page_id,
-            "link_data": {
-                "image_hash": image_hash,
-                "link": link_url,
-                # message (body) must be non-empty
-                "message": body or "Learn more about this opportunity.",
-                "name": headline,
-                "call_to_action": {
-                    "type": cta_type,
-                    "value": {"link": link_url},
-                },
-            },
+        """
+        Create an ad creative and return its ID.
+
+        addon_type controls the CTA / browser add-on:
+          - "whatsapp" → WHATSAPP_MESSAGE CTA that opens wa.me/{number}
+          - "phone"    → CALL_NOW CTA with a tel: link
+          - None/""   → standard CTA (cta_type from caller)
+        display_url, if provided, appears as the URL shown on the ad face
+        (the 'caption' field) — separate from the click destination.
+        """
+        link_data: dict = {
+            "image_hash": image_hash,
+            "link": link_url,
+            "message": body or "Learn more about this opportunity.",
+            "name": headline,
         }
+
+        # Display URL shown on the ad (e.g. "yourstudy.com")
+        if display_url:
+            link_data["caption"] = display_url
+
+        # CTA / browser add-on
+        if addon_type == "whatsapp" and addon_phone:
+            raw = addon_phone.replace(" ", "").replace("-", "")
+            wa_number = raw.lstrip("+")
+            link_data["call_to_action"] = {
+                "type": "WHATSAPP_MESSAGE",
+                "value": {
+                    "link": f"https://wa.me/{wa_number}",
+                    "whatsapp_number": raw if raw.startswith("+") else f"+{wa_number}",
+                },
+            }
+        elif addon_type == "phone" and addon_phone:
+            raw = addon_phone.replace(" ", "").replace("-", "")
+            link_data["call_to_action"] = {
+                "type": "CALL_NOW",
+                "value": {"link": f"tel:{raw}"},
+            }
+        else:
+            link_data["call_to_action"] = {
+                "type": cta_type,
+                "value": {"link": link_url},
+            }
+
+        object_story_spec: dict = {
+            "page_id": page_id,
+            "link_data": link_data,
+        }
+        if instagram_actor_id:
+            object_story_spec["instagram_actor_id"] = instagram_actor_id
+
         result = await self._post(
             f"{self.ad_account_id}/adcreatives",
             {
@@ -436,6 +498,9 @@ class MetaAdsService:
         destination_url: str,
         targeting_countries: list[str],
         backend_root: str,
+        display_url: Optional[str] = None,
+        addon_type: Optional[str] = None,
+        addon_phone: Optional[str] = None,
     ) -> dict:
         """
         Full pipeline: images → campaign → ad set → creatives → ads.
@@ -460,12 +525,22 @@ class MetaAdsService:
         campaign_id = await self.create_campaign(campaign_name)
         logger.info("STEP 1 OK: campaign %s", campaign_id)
 
+        # Fetch the Instagram actor connected to this page (best-effort — no hard failure).
+        # Pre-filling this eliminates the manual Instagram-selection prompt in Ads Manager.
+        logger.info("STEP 1b: Fetching Instagram actor for page %s...", page_id)
+        instagram_actor_id = await self.fetch_instagram_actor_id(page_id)
+        if instagram_actor_id:
+            logger.info("STEP 1b OK: instagram_actor_id %s", instagram_actor_id)
+        else:
+            logger.info("STEP 1b: No connected Instagram account found — skipping Instagram placement")
+
         logger.info("STEP 2: Creating adset...")
         adset_id = await self.create_adset(
             campaign_id=campaign_id,
             name=f"{campaign_name} – Ad Set",
             daily_budget_cents=daily_budget_cents,
             targeting_countries=targeting_countries,
+            page_id=page_id,
         )
         logger.info("STEP 2 OK: adset %s", adset_id)
 
@@ -491,6 +566,10 @@ class MetaAdsService:
                 body=creative.get("body") or "",
                 cta_type=cta_type,
                 link_url=destination_url,
+                instagram_actor_id=instagram_actor_id,
+                display_url=display_url,
+                addon_type=addon_type,
+                addon_phone=addon_phone,
             )
 
             logger.info("STEP 4 OK: creative %s", creative_id)

@@ -15,7 +15,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { PageWithSidebar, SectionCard, MetricSummaryCard, CampaignStatusBadge } from "../shared/Layout";
 import { adsAPI, analyticsAPI, platformConnectionsAPI } from "../../services/api";
 import {
-  Send, Globe, Image, BarChart3, Sparkles,
+  Send, Globe, Image, BarChart3, Sparkles, Copy,
   CheckCircle, Rocket, ChevronDown, ChevronUp, Zap, X, ImageOff,
   Share2, UploadCloud, ExternalLink, Download, Eye, AlertCircle,
   CheckCircle2, Loader2, Mic, PhoneCall, PhoneOff, Volume2, Radio, MessageSquare,
@@ -37,7 +37,7 @@ const DEPLOY_PLATFORMS = [
   {
     id: "vercel",
     label: "Vercel",
-    description: "Deploy to Vercel edge network",
+    description: "Publish on Vercel",
     fields: [
       { key: "token",        label: "Vercel Token",     type: "password", placeholder: "eyJhbGci…" },
       { key: "project_name", label: "Project Name",     type: "text",     placeholder: "my-campaign" },
@@ -46,7 +46,7 @@ const DEPLOY_PLATFORMS = [
   {
     id: "netlify",
     label: "Netlify",
-    description: "Deploy to Netlify CDN",
+    description: "Publish on Netlify",
     fields: [
       { key: "token",     label: "Personal Access Token", type: "password", placeholder: "nfp_…" },
       { key: "site_name", label: "Site Name (optional)",  type: "text",     placeholder: "my-campaign" },
@@ -55,7 +55,7 @@ const DEPLOY_PLATFORMS = [
   {
     id: "render",
     label: "Render",
-    description: "Deploy to Render static sites",
+    description: "Publish on Render",
     fields: [
       { key: "api_key",    label: "API Key",    type: "password", placeholder: "rnd_…" },
       { key: "service_id", label: "Service ID", type: "text",     placeholder: "srv-…" },
@@ -64,7 +64,7 @@ const DEPLOY_PLATFORMS = [
   {
     id: "github_pages",
     label: "GitHub Pages",
-    description: "Host on GitHub Pages",
+    description: "Publish on GitHub Pages",
     fields: [
       { key: "token",  label: "GitHub Token", type: "password", placeholder: "ghp_…" },
       { key: "repo",   label: "Repository",   type: "text",     placeholder: "username/repo" },
@@ -74,7 +74,7 @@ const DEPLOY_PLATFORMS = [
   {
     id: "custom",
     label: "Custom Domain",
-    description: "Deploy via FTP/SFTP to your own server",
+    description: "Publish to your own server",
     fields: [
       { key: "domain",       label: "Domain",                type: "text",     placeholder: "https://mysite.com" },
       { key: "ftp_host",     label: "FTP/SFTP Host",         type: "text",     placeholder: "ftp.mysite.com" },
@@ -89,15 +89,68 @@ const DEPLOY_PLATFORMS = [
 // Only Meta/Instagram is active. Other platforms are shown as "Coming soon".
 // Credentials (access_token, ad_account_id, page_id) come from the stored
 // PlatformConnection — they are no longer entered per-publish.
+// Common currencies for Meta ad accounts
+const CURRENCIES = [
+  { code: "USD", label: "USD — US Dollar" },
+  { code: "EUR", label: "EUR — Euro" },
+  { code: "GBP", label: "GBP — British Pound" },
+  { code: "AUD", label: "AUD — Australian Dollar" },
+  { code: "CAD", label: "CAD — Canadian Dollar" },
+  { code: "NZD", label: "NZD — New Zealand Dollar" },
+  { code: "SGD", label: "SGD — Singapore Dollar" },
+  { code: "HKD", label: "HKD — Hong Kong Dollar" },
+  { code: "CHF", label: "CHF — Swiss Franc" },
+  { code: "SEK", label: "SEK — Swedish Krona" },
+  { code: "NOK", label: "NOK — Norwegian Krone" },
+  { code: "DKK", label: "DKK — Danish Krone" },
+  { code: "JPY", label: "JPY — Japanese Yen" },
+  { code: "INR", label: "INR — Indian Rupee" },
+  { code: "BRL", label: "BRL — Brazilian Real" },
+  { code: "MXN", label: "MXN — Mexican Peso" },
+  { code: "ZAR", label: "ZAR — South African Rand" },
+];
+
+// Top countries with ISO codes for Meta targeting
+const COUNTRY_LIST = [
+  { code: "US", name: "United States" },
+  { code: "GB", name: "United Kingdom" },
+  { code: "CA", name: "Canada" },
+  { code: "AU", name: "Australia" },
+  { code: "NZ", name: "New Zealand" },
+  { code: "IE", name: "Ireland" },
+  { code: "DE", name: "Germany" },
+  { code: "FR", name: "France" },
+  { code: "NL", name: "Netherlands" },
+  { code: "SE", name: "Sweden" },
+  { code: "NO", name: "Norway" },
+  { code: "DK", name: "Denmark" },
+  { code: "CH", name: "Switzerland" },
+  { code: "AT", name: "Austria" },
+  { code: "BE", name: "Belgium" },
+  { code: "ES", name: "Spain" },
+  { code: "IT", name: "Italy" },
+  { code: "PT", name: "Portugal" },
+  { code: "PL", name: "Poland" },
+  { code: "FI", name: "Finland" },
+  { code: "SG", name: "Singapore" },
+  { code: "HK", name: "Hong Kong" },
+  { code: "JP", name: "Japan" },
+  { code: "IN", name: "India" },
+  { code: "ZA", name: "South Africa" },
+  { code: "BR", name: "Brazil" },
+  { code: "MX", name: "Mexico" },
+  { code: "AR", name: "Argentina" },
+  { code: "MY", name: "Malaysia" },
+  { code: "PH", name: "Philippines" },
+];
+
 const SOCIAL_PLATFORMS = {
   "Meta/Instagram": {
     id: "meta",
     active: true,
     usesOAuth: true,   // credentials come from Platform Settings, not typed in here
     fields: [
-      { key: "destination_url",     label: "Destination URL",     type: "text", placeholder: "https://…",  required: true  },
-      { key: "daily_budget",        label: "Daily Budget (USD)",  type: "text", placeholder: "10.00",       required: true  },
-      { key: "targeting_countries", label: "Target Countries",    type: "text", placeholder: "US, GB, CA",  required: false },
+      { key: "destination_url", label: "Destination URL", type: "text", placeholder: "https://…", required: true },
     ],
   },
   "Google Ads": { id: "google_ads", active: false, fields: [] },
@@ -126,8 +179,8 @@ const TAB_TO_PATH = {
 
 const TABS = [
   { key: "overview",   label: "Overview",    icon: Eye },
-  { key: "deploy",     label: "Deploy",      icon: Rocket },
-  { key: "distribute", label: "Distribute",  icon: Share2 },
+  { key: "deploy",     label: "Publish Website", icon: Rocket },
+  { key: "distribute", label: "Upload Ads",      icon: Share2 },
   { key: "manage",     label: "Manage Ads",  icon: TrendingUp },
   { key: "analytics",  label: "Analytics",   icon: BarChart3 },
   { key: "settings",   label: "Settings",    icon: SlidersHorizontal },
@@ -148,6 +201,7 @@ export default function PublisherDashboard() {
   const [hostError,    setHostError]   = useState({});
   const [expandedId,   setExpandedId]  = useState(null);
   const [previewAd,    setPreviewAd]   = useState(null);
+  const autoExpandDone = useRef(false);
 
   // Deploy state
   const [deployExpanded, setDeployExpanded] = useState(null);
@@ -168,7 +222,15 @@ export default function PublisherDashboard() {
   const activeTab = PATH_TO_TAB[location.pathname] || "overview";
 
   useEffect(() => {
-    adsAPI.list().then(setAds).catch(console.error).finally(() => setLoading(false));
+    adsAPI.list().then((data) => {
+      setAds(data);
+      // Auto-expand the most recent campaign in Overview (runs once)
+      if (!autoExpandDone.current && data.length > 0) {
+        autoExpandDone.current = true;
+        const first = data.find((a) => a.status === "approved" || a.status === "published");
+        if (first) setExpandedId(first.id);
+      }
+    }).catch(console.error).finally(() => setLoading(false));
   }, []);
 
   // Load stored Meta connection on mount
@@ -243,18 +305,77 @@ export default function PublisherDashboard() {
 
     const isOpen = distExpanded?.adId === adId && distExpanded?.platformId === platformId;
     if (!isOpen) {
-      // Seed destination_url from the campaign's hosted landing page (if generated)
       const ad = ads.find((a) => a.id === adId);
-      if (ad?.hosted_url) {
-        const fk = `${adId}_${platformId}`;
-        setDistForms((p) => {
-          const existing = p[fk] || {};
-          if (!existing.destination_url) {
-            return { ...p, [fk]: { ...existing, destination_url: ad.hosted_url } };
+      const fk = `${adId}_${platformId}`;
+      setDistForms((p) => {
+        const existing = p[fk] || {};
+        const seeds = {};
+
+        // Seed destination_url from hosted landing page
+        if (!existing.destination_url && ad?.hosted_url) {
+          seeds.destination_url = ad.hosted_url;
+        }
+
+        // AI-suggested daily budget: use strategy daily budget, or spread total over 30 days
+        if (!existing.daily_budget) {
+          const stratBudget =
+            ad?.strategy_json?.daily_budget_usd ||
+            ad?.strategy_json?.daily_budget ||
+            ad?.strategy_json?.recommended_daily_budget;
+          const suggested = stratBudget
+            ? parseFloat(stratBudget)
+            : ad?.budget
+              ? Math.max(5, Math.round((parseFloat(ad.budget) / 30) * 100) / 100)
+              : 10;
+          seeds.daily_budget           = suggested.toFixed(2);
+          seeds._budget_ai_suggested   = true;
+        }
+
+        // Default target countries
+        if (!existing.targeting_countries) {
+          seeds.targeting_countries = "AU,IN,US";
+        }
+
+        // Default currency
+        if (!existing.currency) {
+          seeds.currency = "USD";
+        }
+
+        // AI-suggest browser add-on from campaign signals
+        if (!existing.addon_type) {
+          const strat      = ad?.strategy_json || {};
+          const botConfig  = ad?.bot_config    || {};
+          const adTypes    = ad?.ad_type        || [];
+          const ctaLc      = (strat.cta || "").toLowerCase();
+          // E.164 number stored when the ElevenLabs agent was provisioned
+          const voicePhone = botConfig.voice_phone_number || "";
+
+          let suggestedAddon = "";
+          let suggestedPhone = "";
+
+          if (strat.whatsapp_number || ctaLc.includes("whatsapp")) {
+            suggestedAddon = "whatsapp";
+            suggestedPhone = strat.whatsapp_number || strat.phone_number || "";
+          } else if (
+            adTypes.includes("voicebot") ||
+            adTypes.includes("phone") ||
+            ctaLc.includes("call") ||
+            voicePhone
+          ) {
+            // Phone call → voicebot. Number is resolved server-side from bot_config.
+            suggestedAddon = "phone";
+            // Only seed a phone number for WhatsApp (phone call uses voicebot number automatically)
           }
-          return p;
-        });
-      }
+
+          seeds.addon_type          = suggestedAddon;
+          seeds._addon_ai_suggested = !!suggestedAddon;
+          if (suggestedPhone) seeds.addon_phone = suggestedPhone;
+        }
+
+        return Object.keys(seeds).length
+          ? { ...p, [fk]: { ...existing, ...seeds } }
+          : p;
+      });
     }
     setDistExpanded(isOpen ? null : { adId, platformId });
   };
@@ -365,7 +486,7 @@ export default function PublisherDashboard() {
       <div className="page-header">
         <div>
           <h1 className="page-header__title">Publisher Dashboard</h1>
-          <p className="page-header__subtitle">Publish campaigns, deploy websites, and distribute creatives</p>
+          <p className="page-header__subtitle">Launch campaigns, publish your website, and upload ads to social platforms</p>
         </div>
       </div>
 
@@ -493,13 +614,13 @@ function getDeployChecklist(ad) {
     });
     items.push({
       key:      "distributed",
-      label:    "Distributed to Meta",
+      label:    "Ads uploaded to Meta",
       done:     !!ad.bot_config?.meta_campaign_id,
       detail:   ad.bot_config?.meta_campaign_id
         ? `Campaign ID: ${ad.bot_config.meta_campaign_id}`
-        : "Not yet distributed — go to the Distribute tab",
+        : "Not yet uploaded — go to the Upload Ads tab",
       note:     null,
-      action:   !ad.bot_config?.meta_campaign_id ? { type: "navigate", path: "/publisher/distribute", label: "Go to Distribute" } : null,
+      action:   !ad.bot_config?.meta_campaign_id ? { type: "navigate", path: "/publisher/distribute", label: "Upload Ads" } : null,
     });
   }
 
@@ -573,15 +694,15 @@ function OverviewTab({ approved, published, publishing, publishError, expandedId
       <SectionCard
         title="Campaign Setup"
         subtitle={approved.length > 0
-          ? `${approved.length} approved campaign${approved.length !== 1 ? "s" : ""} ready to deploy`
-          : "All approved campaigns have been deployed"}
+          ? `${approved.length} approved campaign${approved.length !== 1 ? "s" : ""} ready to launch`
+          : "All approved campaigns have been launched"}
       >
         {approved.length === 0 ? (
           <div className="flex flex-col items-center py-10 gap-3">
             <div className="metric-tile__icon-wrap" style={{ width: 48, height: 48 }}>
               <Rocket size={20} style={{ color: "var(--color-sidebar-text)" }} />
             </div>
-            <p className="text-sm" style={{ color: "var(--color-sidebar-text)" }}>No campaigns waiting to be deployed</p>
+            <p className="text-sm" style={{ color: "var(--color-sidebar-text)" }}>No campaigns waiting to be launched</p>
           </div>
         ) : (
           approved.map((ad) => (
@@ -722,7 +843,7 @@ function DeploymentChecklist({ ad, checklist, allDone, publishing, onPublish, on
   return (
     <div className="pub-campaign-detail">
       <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-sidebar-text)", marginBottom: "14px" }}>
-        Deployment Checklist
+        Launch Checklist
       </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
@@ -796,10 +917,10 @@ function DeploymentChecklist({ ad, checklist, allDone, publishing, onPublish, on
       {hasType(ad, "website") && ad.hosted_url && (
         <div style={{ marginBottom: "16px", padding: "10px 14px", borderRadius: "8px", backgroundColor: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.04)", border: "1px solid rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.15)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <p style={{ fontSize: "0.75rem", color: "var(--color-sidebar-text)" }}>
-            <strong>Optional:</strong> Deploy to Vercel, Netlify, or a custom domain for a production URL.
+            <strong>Optional:</strong> Publish your website to Vercel, Netlify, or a custom domain for a live URL.
           </p>
           <button onClick={() => navigate("/publisher/deploy")} className="btn--inline-action--ghost" style={{ fontSize: "0.75rem", flexShrink: 0 }}>
-            <UploadCloud size={11} /> Deploy Tab <ChevronRight size={11} />
+            <UploadCloud size={11} /> Publish Website tab <ChevronRight size={11} />
           </button>
         </div>
       )}
@@ -1459,11 +1580,11 @@ function DeployTab({ ads, deployExpanded, deployForms, deployStatus, onSelectPla
 
   if (deployable.length === 0) {
     return (
-      <SectionCard title="Deploy Websites" subtitle="No deployable website campaigns yet">
+      <SectionCard title="Publish Website" subtitle="No website campaigns ready to publish yet">
         <div className="flex flex-col items-center py-12 gap-3">
           <UploadCloud size={36} style={{ color: "var(--color-sidebar-text)", opacity: 0.4 }} />
           <p className="text-sm" style={{ color: "var(--color-sidebar-text)" }}>
-            Generate a website for an approved campaign to deploy it here
+            Generate a website for an approved campaign to publish it here
           </p>
         </div>
       </SectionCard>
@@ -1509,7 +1630,7 @@ function DeployTab({ ads, deployExpanded, deployForms, deployStatus, onSelectPla
 
           {/* Platform tiles */}
           <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-sidebar-text)", marginBottom: "10px" }}>
-            Deploy to
+            Publish on
           </p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "10px", marginBottom: "16px" }}>
             {DEPLOY_PLATFORMS.map((platform) => {
@@ -1626,7 +1747,7 @@ function DeployConfigForm({ platform, formData, status, onChange, onDeploy }) {
         <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 12px", borderRadius: "8px", backgroundColor: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.08)", border: "1px solid rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.3)", marginBottom: "12px" }}>
           <CheckCircle2 size={14} style={{ color: "var(--color-accent)", flexShrink: 0 }} />
           <p style={{ fontSize: "0.82rem", color: "var(--color-accent)", flex: 1 }}>
-            Deployed successfully{status.url && ` → ${status.url}`}
+            Published successfully{status.url && ` → ${status.url}`}
           </p>
           {status.url && (
             <a href={status.url} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.78rem", color: "var(--color-accent)" }}>
@@ -1645,7 +1766,7 @@ function DeployConfigForm({ platform, formData, status, onChange, onDeploy }) {
         {isDeploying
           ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
           : <UploadCloud size={14} />}
-        {isDeploying ? "Deploying…" : isDeployed ? `Redeploy to ${platform.label}` : `Deploy to ${platform.label}`}
+        {isDeploying ? "Publishing…" : isDeployed ? `Re-publish on ${platform.label}` : `Publish on ${platform.label}`}
       </button>
     </div>
   );
@@ -1920,11 +2041,11 @@ function DistributeTab({
       </div>
 
       {distributable.length === 0 ? (
-        <SectionCard title="Distribute Ad Creatives" subtitle="No distributable ad campaigns yet">
+        <SectionCard title="Upload Ad Creatives" subtitle="No ad campaigns ready to upload yet">
           <div className="flex flex-col items-center py-12 gap-3">
             <Share2 size={36} style={{ color: "var(--color-sidebar-text)", opacity: 0.4 }} />
             <p className="text-sm" style={{ color: "var(--color-sidebar-text)" }}>
-              Generate ad creatives for an approved campaign to distribute them here
+              Generate ad creatives for an approved campaign to upload them here
             </p>
           </div>
         </SectionCard>
@@ -1964,7 +2085,7 @@ function DistributeTab({
 
               {/* Platform tiles */}
               <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-sidebar-text)", marginBottom: "10px" }}>
-                Distribute to
+                Upload to
               </p>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "8px", marginBottom: "16px" }}>
                 {Object.entries(SOCIAL_PLATFORMS).map(([name, cfg]) => {
@@ -2043,6 +2164,118 @@ function DistributePlatformTile({ platformName, selected, status, dim, onClick, 
   );
 }
 
+// ─── Country Picker ───────────────────────────────────────────────────────────
+function CountryPicker({ value, onChange }) {
+  // value: comma-separated ISO codes string e.g. "US,GB,CA"
+  const [query, setQuery] = useState("");
+  const [open,  setOpen]  = useState(false);
+  const ref = useRef(null);
+
+  const selected = value
+    ? value.split(",").map((c) => c.trim().toUpperCase()).filter(Boolean)
+    : [];
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const toggle = (code) => {
+    const next = selected.includes(code)
+      ? selected.filter((c) => c !== code)
+      : [...selected, code];
+    onChange(next.join(","));
+    setQuery("");
+  };
+
+  const filtered = COUNTRY_LIST.filter(
+    (c) =>
+      !selected.includes(c.code) &&
+      (c.name.toLowerCase().includes(query.toLowerCase()) || c.code.toLowerCase().includes(query.toLowerCase()))
+  );
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      {/* Selected chips */}
+      <div
+        onClick={() => setOpen(true)}
+        style={{
+          minHeight: "38px", padding: "4px 8px", borderRadius: "8px", cursor: "text",
+          border: `1px solid ${open ? "var(--color-accent)" : "var(--color-card-border)"}`,
+          backgroundColor: "var(--color-input-bg)",
+          display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center",
+        }}
+      >
+        {selected.map((code) => {
+          const country = COUNTRY_LIST.find((c) => c.code === code);
+          return (
+            <span key={code} style={{
+              display: "inline-flex", alignItems: "center", gap: 4,
+              fontSize: "0.72rem", fontWeight: 600, padding: "2px 8px 2px 10px",
+              borderRadius: 999, backgroundColor: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.1)",
+              border: "1px solid rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.25)",
+              color: "var(--color-accent)",
+            }}>
+              {code} {country ? `· ${country.name}` : ""}
+              <button
+                onClick={(e) => { e.stopPropagation(); toggle(code); }}
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 0, lineHeight: 1, color: "var(--color-accent)", fontSize: "0.8rem", marginLeft: 2 }}
+              >×</button>
+            </span>
+          );
+        })}
+        <input
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          placeholder={selected.length === 0 ? "Search countries…" : "Add country…"}
+          style={{
+            border: "none", outline: "none", background: "transparent",
+            fontSize: "0.8rem", color: "var(--color-input-text)", minWidth: 120, flex: 1,
+            fontFamily: "inherit",
+          }}
+        />
+        {selected.length > 0 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onChange(""); }}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-sidebar-text)", padding: "0 2px", fontSize: "0.72rem" }}
+          >
+            Clear all
+          </button>
+        )}
+      </div>
+
+      {/* Dropdown */}
+      {open && filtered.length > 0 && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 100,
+          maxHeight: 220, overflowY: "auto", borderRadius: 10,
+          border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-card-bg)",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+        }}>
+          {filtered.slice(0, 20).map((c) => (
+            <button
+              key={c.code}
+              onMouseDown={(e) => { e.preventDefault(); toggle(c.code); }}
+              style={{
+                display: "block", width: "100%", textAlign: "left",
+                padding: "8px 14px", border: "none", background: "none", cursor: "pointer",
+                fontSize: "0.8rem", color: "var(--color-input-text)", fontFamily: "inherit",
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-page-bg)"}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+            >
+              <strong style={{ marginRight: 6 }}>{c.code}</strong>{c.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DistributeForm({ platformName, platformConfig, formData, status, creatives, metaConnection, onChange, onPost }) {
   const isPosting = status?.status === "posting";
   const isPosted  = status?.status === "posted";
@@ -2074,7 +2307,7 @@ function DistributeForm({ platformName, platformConfig, formData, status, creati
         Publish to {platformName} via Marketing API
       </p>
       <p style={{ fontSize: "0.75rem", color: "var(--color-muted)", marginBottom: "16px" }}>
-        Ads are created in <strong>PAUSED</strong> state — review and activate them in Meta Ads Manager.
+        All settings below are sent directly to Meta's Marketing API — no manual setup in Ads Manager needed. Ads start <strong>PAUSED</strong> so you can activate when ready.
       </p>
 
       {/* Connection status banner for OAuth platforms */}
@@ -2101,8 +2334,10 @@ function DistributeForm({ platformName, platformConfig, formData, status, creati
         </div>
       )}
 
-      {/* Per-campaign fields (destination URL, budget, targeting) */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "12px", marginBottom: "16px" }}>
+      {/* Per-campaign fields */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "16px" }}>
+
+        {/* Destination URL (generic field loop — only destination_url remains) */}
         {platformConfig.fields.map((field) => (
           <div key={field.key}>
             <label style={labelStyle}>{field.label}{field.required && requiredPill}</label>
@@ -2115,6 +2350,107 @@ function DistributeForm({ platformName, platformConfig, formData, status, creati
             />
           </div>
         ))}
+
+        {/* Daily Budget — custom row with currency + per-creative split */}
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+            <label style={{ ...labelStyle, marginBottom: 0 }}>Daily Budget{requiredPill}</label>
+            {formData._budget_ai_suggested && (
+              <span style={{ fontSize: "0.6rem", fontWeight: 700, padding: "1px 6px", borderRadius: 999, backgroundColor: "rgba(99,102,241,0.1)", color: "rgba(99,102,241,0.9)", border: "1px solid rgba(99,102,241,0.2)" }}>
+                AI suggested
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+            {/* Amount input */}
+            <div style={{ position: "relative", flex: 1 }}>
+              <input
+                type="number"
+                min="1"
+                step="0.01"
+                style={{ ...inputStyle, paddingRight: 8 }}
+                placeholder="10.00"
+                value={formData.daily_budget || ""}
+                onChange={(e) => onChange("daily_budget", e.target.value)}
+                onFocus={() => onChange("_budget_ai_suggested", false)}
+              />
+            </div>
+            {/* Currency selector */}
+            <select
+              value={formData.currency || "USD"}
+              onChange={(e) => onChange("currency", e.target.value)}
+              style={{
+                padding: "8px 10px", borderRadius: "8px", fontSize: "0.8rem",
+                border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-input-bg)",
+                color: "var(--color-input-text)", cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
+              }}
+            >
+              {CURRENCIES.map((c) => (
+                <option key={c.code} value={c.code}>{c.code}</option>
+              ))}
+            </select>
+          </div>
+          {/* Per-creative split */}
+          {(() => {
+            const budget = parseFloat(formData.daily_budget);
+            const numSelected = formData.selected_creatives?.length || 0;
+            const numCreatives = numSelected > 0 ? numSelected : Math.min(1, creatives.length);
+            const currency = formData.currency || "USD";
+            if (!isNaN(budget) && budget > 0 && numCreatives > 0) {
+              const perCreative = (budget / numCreatives).toFixed(2);
+              return (
+                <p style={{ fontSize: "0.7rem", color: "var(--color-sidebar-text)", marginTop: 5 }}>
+                  {currency} {budget.toFixed(2)} shared across {numCreatives} ad{numCreatives !== 1 ? "s" : ""} ≈ <strong>{currency} {perCreative}/day per ad</strong>
+                  {" "}<span style={{ color: "var(--color-muted)" }}>(Meta distributes from the ad set budget)</span>
+                </p>
+              );
+            }
+            return null;
+          })()}
+        </div>
+
+        {/* Target Countries — chip picker */}
+        <div>
+          <label style={labelStyle}>Target Countries</label>
+          <CountryPicker
+            value={formData.targeting_countries || ""}
+            onChange={(val) => onChange("targeting_countries", val)}
+          />
+        </div>
+
+        {/* Browser Add-on — dropdown, AI-seeded from campaign data */}
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+            <label style={{ ...labelStyle, marginBottom: 0 }}>Browser Add-on</label>
+            {formData._addon_ai_suggested && formData.addon_type && (
+              <span style={{ fontSize: "0.6rem", fontWeight: 700, padding: "1px 6px", borderRadius: 999, backgroundColor: "rgba(99,102,241,0.1)", color: "rgba(99,102,241,0.9)", border: "1px solid rgba(99,102,241,0.2)" }}>
+                AI suggested
+              </span>
+            )}
+          </div>
+          <select
+            value={formData.addon_type || ""}
+            onChange={(e) => { onChange("addon_type", e.target.value); onChange("_addon_ai_suggested", false); }}
+            style={{ ...inputStyle, cursor: "pointer" }}
+          >
+            <option value="">None — standard CTA button</option>
+            <option value="whatsapp">WhatsApp — open chat when clicked</option>
+            <option value="phone">Phone call — routes to voicebot</option>
+          </select>
+          {formData.addon_type === "whatsapp" && (
+            <div style={{ marginTop: 8 }}>
+              <label style={labelStyle}>WhatsApp Number{requiredPill}</label>
+              <input
+                type="tel"
+                style={inputStyle}
+                placeholder="+61 400 000 000"
+                value={formData.addon_phone || ""}
+                onChange={(e) => onChange("addon_phone", e.target.value)}
+              />
+            </div>
+          )}
+        </div>
+
       </div>
 
       {/* Creative selector */}
@@ -2257,6 +2593,11 @@ function ManageTab({ ads, metaConnection }) {
     }
   };
 
+  // Auto-load ads for the most recent campaign on mount
+  useEffect(() => {
+    if (metaCampaigns.length > 0) loadMetaAds(metaCampaigns[0].id);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleToggle = async (adId, metaAdId, currentStatus) => {
     const newStatus = currentStatus === "ACTIVE" ? "PAUSED" : "ACTIVE";
     setToggling((p) => ({ ...p, [metaAdId]: true }));
@@ -2345,7 +2686,7 @@ function ManageTab({ ads, metaConnection }) {
         <div className="flex flex-col items-center py-12 gap-3">
           <TrendingUp size={36} style={{ color: "var(--color-sidebar-text)", opacity: 0.4 }} />
           <p className="text-sm" style={{ color: "var(--color-sidebar-text)" }}>
-            Distribute a campaign to Meta from the Distribute tab to manage its ads here.
+            Upload a campaign to Meta from the Upload Ads tab to manage its ads here.
           </p>
         </div>
       </SectionCard>
@@ -2625,14 +2966,322 @@ function ManageTab({ ads, metaConnection }) {
   );
 }
 
+// ─── Optimizer Result ─────────────────────────────────────────────────────────
+
+/**
+ * A single optimization card showing what/why + a Regenerate button.
+ * onRegenerate(item, itemType) → Promise resolves to new item or null on error.
+ */
+function OptimizationItemCard({ item, itemType, adId, index, accentColor }) {
+  const [current, setCurrent]    = useState(item);
+  const [regenerating, setRegen] = useState(false);
+  const [copied, setCopied]      = useState(false);
+  const [marked, setMarked]      = useState(false);
+
+  const handleRegenerate = async () => {
+    setRegen(true);
+    try {
+      const fresh = await analyticsAPI.regenerateItem(adId, current.prompt, itemType);
+      if (fresh?.what) setCurrent(fresh);
+    } catch { /* keep old item on error */ }
+    finally { setRegen(false); }
+  };
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(current.prompt || current.what || "");
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const num = String(index + 1).padStart(2, "0");
+
+  return (
+    <div style={{
+      borderRadius: 12,
+      border: "1px solid var(--color-card-border)",
+      borderLeft: `3px solid ${accentColor}`,
+      backgroundColor: marked ? `${accentColor}08` : "var(--color-card-bg)",
+      overflow: "hidden",
+      transition: "background-color 0.2s",
+    }}>
+      {/* What row */}
+      <div style={{ padding: "12px 14px 10px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <span style={{
+          fontSize: "0.62rem", fontWeight: 800, color: "#fff",
+          background: accentColor, borderRadius: 5, padding: "2px 6px",
+          flexShrink: 0, marginTop: 3, letterSpacing: "0.02em",
+        }}>{num}</span>
+        <p style={{ fontSize: "0.86rem", fontWeight: 700, color: "var(--color-input-text)", lineHeight: 1.45, flex: 1 }}>
+          {current.what}
+        </p>
+      </div>
+
+      {/* Why box */}
+      <div style={{
+        margin: "0 12px 10px", padding: "8px 12px",
+        backgroundColor: "var(--color-page-bg)", borderRadius: 8,
+        display: "flex", gap: 7, alignItems: "flex-start",
+      }}>
+        <Target size={11} style={{ color: "var(--color-sidebar-text)", flexShrink: 0, marginTop: 3 }} />
+        <p style={{ fontSize: "0.75rem", color: "var(--color-sidebar-text)", lineHeight: 1.55 }}>
+          {current.why}
+        </p>
+      </div>
+
+      {/* Footer actions */}
+      <div style={{ padding: "0 12px 10px", display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between" }}>
+        <div style={{ display: "flex", gap: 5 }}>
+          <button
+            onClick={handleCopy}
+            style={{
+              display: "flex", alignItems: "center", gap: 4,
+              fontSize: "0.7rem", fontWeight: 600, padding: "4px 10px", borderRadius: 7,
+              cursor: "pointer", border: "1px solid var(--color-card-border)",
+              backgroundColor: "var(--color-page-bg)", color: "var(--color-sidebar-text)",
+            }}
+          >
+            {copied ? <CheckCircle2 size={10} style={{ color: "#22c55e" }} /> : <Copy size={10} />}
+            {copied ? "Copied!" : "Copy Prompt"}
+          </button>
+          <button
+            onClick={handleRegenerate}
+            disabled={regenerating}
+            style={{
+              display: "flex", alignItems: "center", gap: 4,
+              fontSize: "0.7rem", fontWeight: 600, padding: "4px 10px", borderRadius: 7,
+              cursor: "pointer", border: "1px solid var(--color-card-border)",
+              backgroundColor: "var(--color-page-bg)", color: "var(--color-accent)",
+              opacity: regenerating ? 0.6 : 1,
+            }}
+          >
+            {regenerating
+              ? <Loader2 size={10} style={{ animation: "spin 1s linear infinite" }} />
+              : <RotateCcw size={10} />}
+            {regenerating ? "Regenerating…" : "Regenerate"}
+          </button>
+        </div>
+        <button
+          onClick={() => setMarked(m => !m)}
+          style={{
+            display: "flex", alignItems: "center", gap: 4,
+            fontSize: "0.7rem", fontWeight: 600, padding: "4px 10px", borderRadius: 7,
+            cursor: "pointer", transition: "all 0.15s",
+            border: `1px solid ${marked ? accentColor + "60" : "var(--color-card-border)"}`,
+            backgroundColor: marked ? accentColor + "18" : "transparent",
+            color: marked ? accentColor : "var(--color-sidebar-text)",
+          }}
+        >
+          {marked
+            ? <CheckCircle2 size={10} style={{ color: accentColor }} />
+            : <div style={{ width: 10, height: 10, borderRadius: 3, border: "1.5px solid currentColor" }} />}
+          {marked ? "Done" : "Mark done"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function OptimizerResult({ data, adId }) {
+  const [activeTab, setActiveTab] = useState("cost");
+
+  if (!data) return null;
+
+  // If the backend couldn't parse the AI response it wraps the raw text in
+  // { raw_response: "..." }.  Try to recover structured data from that string
+  // before falling back to showing raw text.
+  let resolved = data;
+  if (data.raw_response && !data.cost_optimization && !data.website_optimization) {
+    try {
+      const raw = data.raw_response;
+      // Try direct parse, then extract the first {...} block
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        const start = raw.indexOf("{");
+        const end   = raw.lastIndexOf("}");
+        if (start !== -1 && end > start) parsed = JSON.parse(raw.slice(start, end + 1));
+      }
+      if (parsed?.cost_optimization || parsed?.website_optimization || parsed?.advertisement_optimization) {
+        resolved = parsed;
+      }
+    } catch { /* fall through to error state */ }
+  }
+
+  // Still no structured data — show a clean error rather than a raw JSON dump
+  if (!resolved.cost_optimization && !resolved.website_optimization && !resolved.advertisement_optimization) {
+    return (
+      <div style={{ padding: "20px", textAlign: "center", borderRadius: 10, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)" }}>
+        <AlertCircle size={24} style={{ color: "var(--color-muted)", margin: "0 auto 8px" }} />
+        <p style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--color-input-text)", marginBottom: 4 }}>Unable to parse optimizer response</p>
+        <p style={{ fontSize: "0.75rem", color: "var(--color-sidebar-text)" }}>Try re-running the optimizer. If this persists, Bedrock may be returning an unexpected format.</p>
+      </div>
+    );
+  }
+
+  const {
+    cost_optimization        = {},
+    website_optimization     = [],
+    advertisement_optimization = [],
+  } = resolved;
+
+  const costItems  = cost_optimization.items || [];
+  const costAssess = cost_optimization.overall_assessment;
+  const budgetDist = cost_optimization.budget_distribution;
+  const trafficWin = cost_optimization.traffic_windows || [];
+
+  const TABS = [
+    { id: "cost",    label: "Cost",        Icon: TrendingUp, accent: "#22c55e", count: costItems.length },
+    { id: "website", label: "Website",     Icon: Globe,      accent: "#6366f1", count: website_optimization.length },
+    { id: "ads",     label: "Ad Creative", Icon: Image,      accent: "#f59e0b", count: advertisement_optimization.length },
+  ];
+
+  return (
+    <div>
+      {/* ── Tab strip ─────────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: 3, backgroundColor: "var(--color-page-bg)", padding: 4, borderRadius: 10, marginBottom: 14 }}>
+        {TABS.map(({ id, label, Icon, accent, count }) => {
+          const active = activeTab === id;
+          return (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              style={{
+                flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                padding: "8px 10px", borderRadius: 8, border: "none", cursor: "pointer",
+                backgroundColor: active ? "var(--color-card-bg)" : "transparent",
+                boxShadow: active ? "0 1px 3px rgba(0,0,0,0.08), 0 0 0 1px var(--color-card-border)" : "none",
+                transition: "all 0.15s",
+              }}
+            >
+              <Icon size={12} style={{ color: active ? accent : "var(--color-sidebar-text)", transition: "color 0.15s" }} />
+              <span style={{ fontSize: "0.78rem", fontWeight: 600, color: active ? "var(--color-input-text)" : "var(--color-sidebar-text)", transition: "color 0.15s" }}>
+                {label}
+              </span>
+              <span style={{
+                fontSize: "0.64rem", fontWeight: 700, padding: "1px 6px", borderRadius: 999,
+                backgroundColor: active ? `${accent}20` : "rgba(107,114,128,0.1)",
+                color: active ? accent : "var(--color-muted)",
+                transition: "all 0.15s",
+              }}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Cost tab ──────────────────────────────────────────────────────── */}
+      {activeTab === "cost" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {costAssess && (
+            <div style={{ padding: "10px 14px", borderRadius: 10, backgroundColor: "rgba(34,197,94,0.05)", border: "1px solid rgba(34,197,94,0.15)", display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <TrendingUp size={13} style={{ color: "#22c55e", flexShrink: 0, marginTop: 2 }} />
+              <p style={{ fontSize: "0.78rem", color: "var(--color-input-text)", lineHeight: 1.6 }}>{costAssess}</p>
+            </div>
+          )}
+
+          {budgetDist && (budgetDist.increase_days?.length > 0 || budgetDist.reduce_days?.length > 0) && (
+            <div style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-card-bg)" }}>
+              <p style={{ fontSize: "0.67rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-sidebar-text)", marginBottom: 8 }}>Budget Reallocation</p>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                {budgetDist.increase_days?.map((d, i) => (
+                  <span key={i} style={{ fontSize: "0.71rem", fontWeight: 600, padding: "3px 10px", borderRadius: 999, backgroundColor: "rgba(34,197,94,0.08)", color: "#15803d", border: "1px solid rgba(34,197,94,0.2)" }}>↑ {d}</span>
+                ))}
+                {budgetDist.reduce_days?.map((d, i) => (
+                  <span key={i} style={{ fontSize: "0.71rem", fontWeight: 600, padding: "3px 10px", borderRadius: 999, backgroundColor: "rgba(239,68,68,0.08)", color: "#dc2626", border: "1px solid rgba(239,68,68,0.2)" }}>↓ {d}</span>
+                ))}
+                {budgetDist.reallocation_pct && (
+                  <span style={{ fontSize: "0.7rem", color: "var(--color-sidebar-text)", marginLeft: 2 }}>— shift {budgetDist.reallocation_pct}</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {costItems.map((item, i) => (
+            <OptimizationItemCard key={i} item={item} itemType="cost" adId={adId} index={i} accentColor="#22c55e" />
+          ))}
+          {costItems.length === 0 && !costAssess && (
+            <p style={{ textAlign: "center", padding: "28px 0", color: "var(--color-sidebar-text)", fontSize: "0.82rem" }}>No cost actions generated for this period.</p>
+          )}
+
+          {trafficWin.length > 0 && (
+            <div style={{ borderRadius: 10, overflow: "hidden", border: "1px solid var(--color-card-border)", marginTop: 2 }}>
+              <div style={{ padding: "8px 14px", backgroundColor: "var(--color-card-bg)", borderBottom: "1px solid var(--color-card-border)", display: "flex", alignItems: "center", gap: 6 }}>
+                <Clock size={12} style={{ color: "var(--color-sidebar-text)" }} />
+                <p style={{ fontSize: "0.7rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-sidebar-text)" }}>Traffic Windows</p>
+              </div>
+              {trafficWin.map((w, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, padding: "10px 14px", borderBottom: i < trafficWin.length - 1 ? "1px solid var(--color-card-border)" : "none", backgroundColor: "var(--color-page-bg)", alignItems: "flex-start" }}>
+                  <span style={{
+                    fontSize: "0.64rem", fontWeight: 700, padding: "2px 8px", borderRadius: 999, whiteSpace: "nowrap", flexShrink: 0,
+                    backgroundColor: w.recommended_action === "increase" ? "rgba(34,197,94,0.1)" : w.recommended_action === "pause" ? "rgba(239,68,68,0.1)" : "rgba(234,179,8,0.1)",
+                    color: w.recommended_action === "increase" ? "#15803d" : w.recommended_action === "pause" ? "#dc2626" : "#92400e",
+                    border: `1px solid ${w.recommended_action === "increase" ? "rgba(34,197,94,0.2)" : w.recommended_action === "pause" ? "rgba(239,68,68,0.2)" : "rgba(234,179,8,0.25)"}`,
+                  }}>
+                    {w.recommended_action?.toUpperCase()}
+                  </span>
+                  <div>
+                    <p style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--color-input-text)", marginBottom: 2 }}>{w.window}</p>
+                    <p style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)" }}>{w.reasoning}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Website tab ───────────────────────────────────────────────────── */}
+      {activeTab === "website" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {website_optimization.map((item, i) => (
+            <OptimizationItemCard key={i} item={item} itemType="website" adId={adId} index={i} accentColor="#6366f1" />
+          ))}
+          {website_optimization.length === 0 && (
+            <p style={{ textAlign: "center", padding: "28px 0", color: "var(--color-sidebar-text)", fontSize: "0.82rem" }}>No website suggestions generated.</p>
+          )}
+        </div>
+      )}
+
+      {/* ── Ad Creative tab ───────────────────────────────────────────────── */}
+      {activeTab === "ads" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {advertisement_optimization.map((item, i) => (
+            <OptimizationItemCard key={i} item={item} itemType="advertisement" adId={adId} index={i} accentColor="#f59e0b" />
+          ))}
+          {advertisement_optimization.length === 0 && (
+            <p style={{ textAlign: "center", padding: "28px 0", color: "var(--color-sidebar-text)", fontSize: "0.82rem" }}>No creative suggestions generated.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Publisher Analytics Sub-component ───────────────────────────────────────
+const OPTIMIZER_STEPS = [
+  { label: "Fetching performance data" },
+  { label: "Analyzing cost efficiency" },
+  { label: "Reviewing content signals" },
+  { label: "Identifying traffic windows" },
+  { label: "Generating recommendations" },
+];
+
 function PublisherAnalytics({ ads }) {
-  const [selectedAd,   setSelectedAd]   = useState(null);
-  const [datePreset,   setDatePreset]   = useState("last_30d");
-  const [insights,     setInsights]     = useState(null);   // { rows: [...] }
-  const [syncing,      setSyncing]      = useState(false);
-  const [suggestions,  setSuggestions]  = useState(null);
-  const [optimizing,   setOptimizing]   = useState(false);
+  const [selectedAd,    setSelectedAd]    = useState(null);
+  const [datePreset,    setDatePreset]    = useState("last_30d");
+  const [insights,      setInsights]      = useState(null);   // { rows: [...] }
+  const [syncing,       setSyncing]       = useState(false);
+  const [suggestions,   setSuggestions]   = useState(null);
+  const [optimizing,    setOptimizing]    = useState(false);
+  const [optimizerStep, setOptimizerStep] = useState(0);
+
+  useEffect(() => {
+    if (!optimizing) { setOptimizerStep(0); return; }
+    const id = setInterval(() => setOptimizerStep(s => (s + 1) % OPTIMIZER_STEPS.length), 1400);
+    return () => clearInterval(id);
+  }, [optimizing]);
 
   const activeAd = selectedAd || ads[0] || null;
 
@@ -2663,9 +3312,16 @@ function PublisherAnalytics({ ads }) {
   const handleDecision = async (decision) => {
     if (!activeAd) return;
     try {
-      await analyticsAPI.submitDecision(activeAd.id, { decision });
+      const s = suggestions?.suggestions || {};
+      await analyticsAPI.submitDecision(activeAd.id, {
+        decision,
+        applied_changes: {
+          cost_items:          s.cost_optimization?.items         || [],
+          website_items:       s.website_optimization             || [],
+          advertisement_items: s.advertisement_optimization       || [],
+        },
+      });
       setSuggestions(null);
-      alert(`Decision "${decision}" recorded.`);
     } catch (err) { alert(err.message); }
   };
 
@@ -2685,15 +3341,49 @@ function PublisherAnalytics({ ads }) {
 
   // KPIs from strategy
   const strategyKpis = (activeAd?.strategy_json?.kpis || []);
+  const hasSynced    = !!insights;
 
-  // Map strategy KPI metric names to computed actuals
-  const kpiActualMap = {
-    "CTR":             avgCtr !== "–" ? `${avgCtr}%` : null,
-    "Impressions":     totals.impressions > 0 ? totals.impressions.toLocaleString() : null,
-    "Conversions":     totals.conversions > 0 ? totals.conversions.toLocaleString() : null,
-    "Spend":           totals.spend > 0 ? `$${totals.spend.toFixed(2)}` : null,
-    "CPC":             totals.clicks && totals.spend ? `$${(totals.spend / totals.clicks).toFixed(2)}` : null,
-    "Conversion Rate": totals.clicks && totals.conversions ? `${((totals.conversions / totals.clicks) * 100).toFixed(1)}%` : null,
+  /**
+   * Fuzzy-match a strategy KPI name against Meta totals.
+   * Returns a display string when the metric IS derivable from Meta data (including "0").
+   * Returns undefined when the KPI simply cannot be derived from Meta (e.g. Pre-Screener rate).
+   */
+  const resolveKpiFromMeta = (metric) => {
+    const m = metric.toLowerCase();
+
+    if (m.includes("impression"))
+      return totals.impressions.toLocaleString();
+
+    if (m.includes("reach"))
+      return totals.reach.toLocaleString();
+
+    if (m.includes("cpm"))
+      return avgCpm !== "–" ? `$${avgCpm}` : "$0.00";
+
+    if (m.includes("ctr") || m.includes("click-to-page") || m.includes("click rate") || m.includes("click through"))
+      return avgCtr !== "–" ? `${avgCtr}%` : "0.00%";
+
+    // Bare "clicks" — avoid matching "cost per click", "ctr", "rate"
+    if (m.includes("click") && !m.includes("cost") && !m.includes("cpc") && !m.includes("rate") && !m.includes("ctr") && !m.includes("through"))
+      return totals.clicks.toLocaleString();
+
+    if (m.includes("cpc") || m.includes("cost per click") || m.includes("cost per link click"))
+      return totals.clicks ? `$${(totals.spend / totals.clicks).toFixed(2)}` : "–";
+
+    if (m.includes("cpl") || m.includes("cost per lead"))
+      return totals.conversions ? `$${(totals.spend / totals.conversions).toFixed(2)}` : "–";
+
+    if (m.includes("cpa") || m.includes("cost per enrolled") || m.includes("cost per acquisition") || m.includes("cost per participant"))
+      return totals.conversions ? `$${(totals.spend / totals.conversions).toFixed(2)}` : "–";
+
+    if (m.includes("spend") || m.includes("amount spent"))
+      return `$${totals.spend.toFixed(2)}`;
+
+    if (m.includes("conversion") || m.includes("enrolled participant") || m.includes("total enrolled") || m.includes("enrolled"))
+      return totals.conversions.toLocaleString();
+
+    // This KPI cannot be derived from Meta Ads data (e.g. Pre-Screener rates, survey metrics)
+    return undefined;
   };
 
   const chartData = (insights?.rows || []).map((r) => ({
@@ -2757,7 +3447,7 @@ function PublisherAnalytics({ ads }) {
             Sync from Meta
           </button>
           {!activeAd?.bot_config?.meta_campaign_id && (
-            <span style={{ fontSize: "0.72rem", color: "var(--color-muted)" }}>Distribute to Meta first to fetch live data</span>
+            <span style={{ fontSize: "0.72rem", color: "var(--color-muted)" }}>Upload to Meta first to fetch live data</span>
           )}
         </div>
 
@@ -2835,13 +3525,16 @@ function PublisherAnalytics({ ads }) {
         >
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "10px" }}>
             {strategyKpis.map((kpi, i) => {
-              const achieved = kpiActualMap[kpi.metric] || null;
+              const achieved = hasSynced ? resolveKpiFromMeta(kpi.metric) : undefined;
+              const badgeLabel = !hasSynced ? "PENDING SYNC" : achieved !== undefined ? "TRACKED" : "NOT IN META";
+              const badgeBg = !hasSynced ? "rgba(107,114,128,0.1)" : achieved !== undefined ? "rgba(34,197,94,0.1)" : "rgba(99,102,241,0.1)";
+              const badgeColor = !hasSynced ? "var(--color-muted)" : achieved !== undefined ? "#15803d" : "rgba(99,102,241,0.8)";
               return (
                 <div key={i} style={{ padding: "14px 16px", borderRadius: "10px", border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                     <p style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--color-input-text)" }}>{kpi.metric}</p>
-                    <span style={{ fontSize: "0.62rem", padding: "1px 7px", borderRadius: 999, backgroundColor: achieved ? "rgba(34,197,94,0.1)" : "rgba(107,114,128,0.1)", color: achieved ? "#15803d" : "var(--color-muted)", fontWeight: 600 }}>
-                      {achieved ? "TRACKED" : "PENDING SYNC"}
+                    <span style={{ fontSize: "0.62rem", padding: "1px 7px", borderRadius: 999, backgroundColor: badgeBg, color: badgeColor, fontWeight: 600 }}>
+                      {badgeLabel}
                     </span>
                   </div>
                   <div style={{ display: "flex", gap: "12px" }}>
@@ -2851,8 +3544,8 @@ function PublisherAnalytics({ ads }) {
                     </div>
                     <div style={{ borderLeft: "1px solid var(--color-card-border)", paddingLeft: 12 }}>
                       <p style={{ fontSize: "0.62rem", fontWeight: 600, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 2 }}>Achieved</p>
-                      <p style={{ fontSize: "1rem", fontWeight: 700, color: achieved ? "var(--color-input-text)" : "var(--color-muted)" }}>
-                        {achieved || "–"}
+                      <p style={{ fontSize: "1rem", fontWeight: 700, color: achieved !== undefined ? "var(--color-input-text)" : "var(--color-muted)" }}>
+                        {achieved !== undefined ? achieved : "–"}
                       </p>
                     </div>
                   </div>
@@ -2867,8 +3560,9 @@ function PublisherAnalytics({ ads }) {
       )}
 
       {/* Optimizer */}
-      <SectionCard title="AI Optimizer" subtitle="Get suggestions to improve underperforming campaigns">
-        <div className="pub-campaign-row" style={{ marginBottom: suggestions ? 16 : 0 }}>
+      <SectionCard title="AI Optimizer" subtitle="Cost + content suggestions derived from your analytics data">
+        {/* Campaign row + action button */}
+        <div className="pub-campaign-row" style={{ marginBottom: (suggestions || optimizing) ? 20 : 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div className="pub-campaign-row__dot--live" />
             <div>
@@ -2880,26 +3574,78 @@ function PublisherAnalytics({ ads }) {
             {optimizing
               ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />
               : <Sparkles size={12} />}
-            {optimizing ? "Analyzing…" : "Optimize"}
+            {optimizing ? "Analyzing…" : suggestions ? "Re-run" : "Optimize"}
           </button>
         </div>
 
-        {suggestions && (
-          <>
-            <div className="code-preview--highlight mb-4">
-              <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "0.78rem" }}>
-                {JSON.stringify(suggestions.suggestions, null, 2)}
-              </pre>
+        {/* Loading state */}
+        {optimizing && (
+          <div style={{ padding: "28px 0 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+            <div style={{ position: "relative", width: 48, height: 48 }}>
+              <div style={{ width: 48, height: 48, borderRadius: "50%", border: "3px solid var(--color-card-border)", borderTop: "3px solid var(--color-accent)", animation: "spin 0.9s linear infinite" }} />
+              <Sparkles size={16} style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", color: "var(--color-accent)" }} />
             </div>
-            <div className="flex gap-3">
-              <button onClick={() => handleDecision("accepted")} className="btn--approve">
-                <CheckCircle size={14} /> Accept &amp; Redeploy
-              </button>
-              <button onClick={() => handleDecision("partial")} className="btn--revise">Partial Accept</button>
-              <button onClick={() => handleDecision("rejected")} className="btn--ghost flex-1 py-2.5">Reject</button>
+            <div style={{ textAlign: "center" }}>
+              <p style={{ fontSize: "0.86rem", fontWeight: 700, color: "var(--color-input-text)", marginBottom: 10 }}>
+                {OPTIMIZER_STEPS[optimizerStep].label}…
+              </p>
+              <div style={{ display: "flex", gap: 5, justifyContent: "center" }}>
+                {OPTIMIZER_STEPS.map((_, i) => (
+                  <div key={i} style={{
+                    height: 5, borderRadius: 3,
+                    width: i === optimizerStep ? 20 : 6,
+                    backgroundColor: i <= optimizerStep ? "var(--color-accent)" : "var(--color-card-border)",
+                    transition: "all 0.35s",
+                  }} />
+                ))}
+              </div>
             </div>
-          </>
+          </div>
         )}
+
+        {/* Idle state — no suggestions yet */}
+        {!suggestions && !optimizing && (
+          <div style={{ padding: "4px 0 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {[
+                { Icon: TrendingUp, color: "#22c55e", bg: "rgba(34,197,94,0.07)", label: "Cost Optimization" },
+                { Icon: Globe,      color: "#6366f1", bg: "rgba(99,102,241,0.07)", label: "Website" },
+                { Icon: Image,      color: "#f59e0b", bg: "rgba(245,158,11,0.07)", label: "Ad Creative" },
+              ].map(({ Icon, color, bg, label }) => (
+                <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, border: `1px solid ${color}30`, backgroundColor: bg }}>
+                  <Icon size={12} style={{ color }} />
+                  <span style={{ fontSize: "0.75rem", fontWeight: 600, color }}>{label}</span>
+                </div>
+              ))}
+            </div>
+            <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)", lineHeight: 1.6 }}>
+              Analyzes your Meta performance data to suggest cost reallocation, content improvements, and creative updates tailored to this campaign.
+            </p>
+          </div>
+        )}
+
+        {/* Results */}
+        {suggestions && !optimizing && (() => {
+          const s = suggestions.suggestions || {};
+          const totalCount =
+            (s.cost_optimization?.items?.length || 0) +
+            (s.website_optimization?.length || 0) +
+            (s.advertisement_optimization?.length || 0);
+          return (
+            <>
+              <OptimizerResult data={s} adId={activeAd?.id} />
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--color-card-border)", display: "flex", alignItems: "center", gap: 10 }}>
+                <button onClick={() => handleDecision("accepted")} className="btn--approve">
+                  <CheckCircle size={14} />
+                  Apply All{totalCount > 0 ? ` (${totalCount})` : ""}
+                </button>
+                <button onClick={() => handleDecision("rejected")} className="btn--ghost" style={{ padding: "8px 16px" }}>
+                  Dismiss
+                </button>
+              </div>
+            </>
+          );
+        })()}
       </SectionCard>
     </div>
   );

@@ -129,7 +129,7 @@ async def list_advertisements(
     query = select(Advertisement).where(Advertisement.company_id == user.company_id)
     if status:
         query = query.where(Advertisement.status == status)
-    result = await db.execute(query.order_by(Advertisement.updated_at.desc()))
+    result = await db.execute(query.order_by(Advertisement.created_at.desc()))
     return result.scalars().all()
 
 
@@ -955,6 +955,11 @@ async def distribute_to_meta(
     daily_budget_str   = str(cfg.get("daily_budget", "10")).strip()
     countries_str      = cfg.get("targeting_countries", "US").strip()
     selected_creatives = cfg.get("selected_creatives") or []
+    display_url        = (cfg.get("display_url")  or "").strip() or None
+    addon_type         = (cfg.get("addon_type")   or "").strip() or None
+    addon_phone        = (cfg.get("addon_phone")  or "").strip() or None
+    # "phone" add-on always routes to the provisioned voicebot number —
+    # resolved from bot_config below after the ad is loaded.
 
     # ── Load stored platform connection ──────────────────────────────────────
     conn_result = await db.execute(
@@ -1015,6 +1020,19 @@ async def distribute_to_meta(
             detail="No ad creatives found. Generate creatives first.",
         )
 
+    # For "phone" add-on, use the voicebot number stored during agent provisioning.
+    # No manual number entry required — the CTA always points at the voice agent.
+    if addon_type == "phone" and not addon_phone:
+        addon_phone = (ad.bot_config or {}).get("voice_phone_number") or None
+        if not addon_phone:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "No voicebot phone number found. "
+                    "Provision the voice agent first so its number can be used for the ad CTA."
+                ),
+            )
+
     # ── Publish to Meta ───────────────────────────────────────────────────────
     svc = MetaAdsService(access_token=access_token, ad_account_id=ad_account_id)
     try:
@@ -1027,6 +1045,9 @@ async def distribute_to_meta(
             destination_url=destination_url,
             targeting_countries=targeting_countries,
             backend_root=str(BACKEND_ROOT),
+            display_url=display_url,
+            addon_type=addon_type,
+            addon_phone=addon_phone,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -1201,11 +1222,28 @@ async def update_meta_ad(
     conn = conn_result.scalar_one_or_none()
     _, _, access_token, ad_account_id, page_id_default = _get_meta_conn_and_ids(ad, conn)
 
+    bot        = ad.bot_config or {}
+    adset_id   = bot.get("meta_adset_id")
+    campaign_id_stored = bot.get("meta_campaign_id")
+
     svc = MetaAdsService(access_token=access_token, ad_account_id=ad_account_id)
     try:
         status = (body.get("status") or "").upper()
         if status in ("ACTIVE", "PAUSED"):
             result = await svc.update_ad_status(meta_ad_id, status)
+            # When activating an ad, the parent ad set AND campaign must also be
+            # ACTIVE — otherwise Meta won't deliver even if the ad itself is ACTIVE.
+            if status == "ACTIVE":
+                if adset_id:
+                    try:
+                        await svc.update_ad_status(adset_id, "ACTIVE")
+                    except Exception as e:
+                        logger.warning("Could not activate ad set %s: %s", adset_id, e)
+                if campaign_id_stored:
+                    try:
+                        await svc.update_ad_status(campaign_id_stored, "ACTIVE")
+                    except Exception as e:
+                        logger.warning("Could not activate campaign %s: %s", campaign_id_stored, e)
         elif body.get("headline") or body.get("body"):
             # Creative text update — requires image_hash + page_id
             image_hash = body.get("image_hash", "")

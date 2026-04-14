@@ -336,16 +336,20 @@ body {
   /* ── SIDEBAR ─────────────────────────────────────────────────────────────── */
 
   .sidebar {
-    @apply w-60 min-h-screen flex flex-col shrink-0;
+    @apply w-60 flex flex-col shrink-0;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow: hidden;
     background-color: var(--color-sidebar-bg);
     color: #f3f4f6;
   }
-  .sidebar__brand        { @apply px-5 py-5; border-bottom: 1px solid var(--color-sidebar-border); }
+  .sidebar__brand        { @apply px-5 py-5; border-bottom: 1px solid var(--color-sidebar-border); flex-shrink: 0; }
   .sidebar__logo-mark    { @apply w-7 h-7 rounded-md flex items-center justify-center shrink-0;
                            background-color: var(--color-accent); }
   .sidebar__app-name     { @apply text-sm font-semibold tracking-tight text-white; }
   .sidebar__role-label   { @apply text-xs mt-2 ml-9 capitalize; color: var(--color-sidebar-text); }
-  .sidebar__nav          { @apply flex-1 py-3 px-3; }
+  .sidebar__nav          { @apply flex-1 py-3 px-3; overflow-y: auto; }
 
   .sidebar__nav-link {
     @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm mb-0.5 transition-colors;

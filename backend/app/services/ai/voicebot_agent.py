@@ -61,25 +61,39 @@ class VoicebotAgentService:
             logger.info("Updated ElevenLabs agent %s for ad %s", existing_agent_id, advertisement_id)
         else:
             agent = await self._create_agent(payload)
-            # Must copy the dict — plain Column(JSON) doesn't track in-place mutations,
-            # so reassigning a new object is required for SQLAlchemy to detect the change.
             new_config = dict(bot_config)
             new_config["elevenlabs_agent_id"] = agent["agent_id"]
             ad.bot_config = new_config
             await self.db.commit()
             logger.info("Created ElevenLabs agent %s for ad %s", agent["agent_id"], advertisement_id)
 
+        # Fetch and persist the actual E.164 phone number so the distribute form
+        # can auto-fill it when setting the Meta ad CTA to "Phone call".
+        if not bot_config.get("voice_phone_number"):
+            try:
+                async with httpx.AsyncClient() as _client:
+                    details = await self._get_phone_number_details(_client)
+                    if details.get("phone_number"):
+                        refreshed = dict(ad.bot_config or {})
+                        refreshed["voice_phone_number"] = details["phone_number"]
+                        ad.bot_config = refreshed
+                        await self.db.commit()
+                        logger.info(
+                            "Stored voice_phone_number %s for ad %s",
+                            details["phone_number"], advertisement_id,
+                        )
+            except Exception as exc:
+                logger.warning("Could not fetch ElevenLabs phone number for ad %s: %s", advertisement_id, exc)
+
         return agent
 
-    async def _get_phone_number_id(self, client: httpx.AsyncClient) -> str:
+    async def _get_phone_number_details(self, client: httpx.AsyncClient) -> Dict[str, str]:
         """
-        Return the phone number ID to use for outbound calls.
+        Return the phone number ID and actual E.164 number for outbound calls.
         Prefers ELEVENLABS_PHONE_NUMBER_ID env var; falls back to fetching
         the first configured phone number from the ElevenLabs account.
+        Returns {"phone_number_id": "...", "phone_number": "+1234567890"}
         """
-        if settings.ELEVENLABS_PHONE_NUMBER_ID:
-            return settings.ELEVENLABS_PHONE_NUMBER_ID
-
         resp = await client.get(
             f"{ELEVENLABS_BASE}/v1/convai/phone-numbers",
             headers=self._headers,
@@ -97,7 +111,27 @@ class VoicebotAgentService:
                 "No phone numbers are configured in your ElevenLabs account. "
                 "Go to ElevenLabs > Conversational AI > Phone Numbers and add one."
             )
-        return numbers[0].get("phone_number_id") or numbers[0].get("id")
+        # If env var is set, find matching entry; otherwise use first
+        target = numbers[0]
+        if settings.ELEVENLABS_PHONE_NUMBER_ID:
+            match = next(
+                (n for n in numbers
+                 if n.get("phone_number_id") == settings.ELEVENLABS_PHONE_NUMBER_ID
+                 or n.get("id") == settings.ELEVENLABS_PHONE_NUMBER_ID),
+                None,
+            )
+            if match:
+                target = match
+
+        return {
+            "phone_number_id": target.get("phone_number_id") or target.get("id", ""),
+            "phone_number":    target.get("phone_number", ""),
+        }
+
+    async def _get_phone_number_id(self, client: httpx.AsyncClient) -> str:
+        """Return just the phone number ID (backwards-compat wrapper)."""
+        details = await self._get_phone_number_details(client)
+        return details["phone_number_id"]
 
     async def outbound_call(self, advertisement_id: str, to_number: str) -> Dict[str, Any]:
         """

@@ -137,6 +137,19 @@ export const authAPI = {
 
   // Re-issue a fresh token without requiring the user to re-enter credentials.
   refresh: () => request("/auth/refresh", { method: "POST" }),
+
+  // Check if an email is already registered (used at onboarding step 1).
+  checkEmail: (email) => request(`/auth/check-email?email=${encodeURIComponent(email)}`),
+
+  // Password change via email OTP (authenticated user only)
+  requestPasswordChange: () =>
+    request("/auth/request-password-change", { method: "POST" }),
+
+  confirmPasswordChange: (code, newPassword) =>
+    request("/auth/confirm-password-change", {
+      method: "POST",
+      body: JSON.stringify({ code, new_password: newPassword }),
+    }),
 };
 
 // ─── M3: Onboarding ─────────────────────────────────────────────────────────
@@ -593,6 +606,12 @@ export const analyticsAPI = {
 
   triggerOptimize: (adId) =>
     request(`/analytics/${adId}/optimize`, { method: "POST" }),
+
+  regenerateItem: (adId, prompt, itemType = "general") =>
+    request(`/analytics/${adId}/regenerate-item`, {
+      method: "POST",
+      body: JSON.stringify({ prompt, item_type: itemType }),
+    }),
 
   submitDecision: (adId, data) =>
     request(`/analytics/${adId}/decision`, {

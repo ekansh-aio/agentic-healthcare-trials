@@ -186,8 +186,18 @@ export default function OnboardingPage() {
         setSavedDocCount(i + 1);
       }
 
-      // 8. Create brand kit (skip on retry if already created).
-      if (!brandKitSaved) {
+      // 7. Save operating locations — only if the user added any.
+      //    Skipped on retry — locations were already saved.
+      if (!companyId && locations.length > 0) {
+        await companyAPI.updateLocations(locations);
+      }
+
+      // 8. Create brand kit — only if the user made a selection or uploaded a PDF.
+      //    If the user skipped, all color fields are null and there is nothing
+      //    meaningful to save, so we skip the API call entirely and leave the
+      //    platform running on its default theme.
+      //    Skipped on retry — brand kit was already created.
+      if (!companyId) {
         const hasBrandData = brand.primaryColor || brand.accentColor || brandPdfFile || selectedPreset;
         if (hasBrandData) {
           const createdBrandKit = await brandKitAPI.create({

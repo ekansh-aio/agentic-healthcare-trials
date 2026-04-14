@@ -65,7 +65,16 @@ class TokenResponse(BaseModel):
     company_name: str
     company_industry: Optional[str] = None
     user_id: str
+    full_name: str = ""
+    email: str = ""
     onboarded: bool = False
+
+
+# ─── Password Change Schemas ─────────────────────────────────────────────────
+
+class ConfirmPasswordChangeRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=6)
+    new_password: str = Field(..., min_length=8)
 
 
 # ─── Onboarding Schemas ──────────────────────────────────────────────────────

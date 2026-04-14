@@ -3,15 +3,20 @@ M7/M15: Analytics & Optimizer Routes
 Owner: Backend Dev 2 / AI Dev
 Dependencies: M1, M2, M7 (Optimizer Service)
 
-GET  /analytics/{ad_id}             — Performance data for an advertisement
-POST /analytics/{ad_id}/optimize    — Trigger optimizer suggestions
-POST /analytics/{ad_id}/decision    — Human accepts/rejects optimizer suggestions
+GET  /analytics/{ad_id}                  — Performance data for an advertisement
+POST /analytics/{ad_id}/optimize         — Trigger optimizer suggestions
+POST /analytics/{ad_id}/regenerate-item  — Regenerate a single optimization item via its prompt
+POST /analytics/{ad_id}/decision         — Human accepts/rejects optimizer suggestions
 """
 
+import json
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List
+from typing import List, Optional
 
 from app.db.database import get_db
 from app.models.models import (
@@ -19,6 +24,7 @@ from app.models.models import (
 )
 from app.schemas.schemas import AnalyticsOut, OptimizerSuggestion, OptimizerDecision
 from app.core.security import require_roles, get_current_user
+from app.core.bedrock import get_async_client, get_model, is_configured
 from app.services.optimization.optimizer import OptimizerService
 
 router = APIRouter(prefix="/analytics", tags=["Analytics & Optimization"])
@@ -90,6 +96,69 @@ async def trigger_optimization(
         suggestions=suggestions["suggestions"],
         context=suggestions.get("context"),
     )
+
+
+class RegenerateItemRequest(BaseModel):
+    prompt: str
+    item_type: Optional[str] = "general"  # "cost" | "website" | "advertisement"
+
+
+@router.post("/{ad_id}/regenerate-item")
+async def regenerate_optimizer_item(
+    ad_id: str,
+    body: RegenerateItemRequest,
+    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PUBLISHER, UserRole.PROJECT_MANAGER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Regenerate a single optimization item using its stored AI prompt.
+    Returns a new { what, why, prompt } object.
+    """
+    if not is_configured():
+        return {
+            "what":   "Regenerated suggestion (Bedrock not configured)",
+            "why":    f"Prompt used: {body.prompt[:120]}…",
+            "prompt": body.prompt,
+        }
+
+    system_prompt = (
+        "You are a marketing optimization AI. "
+        "Given a prompt, return a single optimization suggestion as a JSON object with exactly three keys: "
+        "'what' (the specific change to make), "
+        "'why' (data-driven reason), and "
+        "'prompt' (an improved self-contained prompt for future regeneration). "
+        "Output ONLY a raw JSON object — no markdown, no code fences. "
+        "Your entire response must start with { and end with }."
+    )
+
+    client = get_async_client()
+    response = await client.messages.create(
+        model=get_model(),
+        max_tokens=800,
+        system=system_prompt,
+        messages=[{"role": "user", "content": body.prompt}],
+    )
+    text = response.content[0].text.strip()
+
+    for extractor in [
+        lambda t: json.loads(t),
+        lambda t: json.loads(
+            re.sub(r"^```[a-zA-Z]*\s*", "", re.sub(r"\s*```\s*$", "", t)).strip()
+        ),
+        lambda t: json.loads(re.search(r"\{[\s\S]*\}", t).group(0)),
+    ]:
+        try:
+            result = extractor(text)
+            # Ensure all three keys exist
+            return {
+                "what":   result.get("what",   ""),
+                "why":    result.get("why",    ""),
+                "prompt": result.get("prompt", body.prompt),
+            }
+        except Exception:
+            continue
+
+    return {"what": text, "why": "Raw AI response", "prompt": body.prompt}
 
 
 @router.post("/{ad_id}/decision")

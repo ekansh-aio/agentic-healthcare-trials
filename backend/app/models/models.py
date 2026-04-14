@@ -243,6 +243,23 @@ class Advertisement(Base):
     survey_responses   = relationship("SurveyResponse", back_populates="advertisement", cascade="all, delete-orphan")
 
 
+# ─── Password Reset OTP ───────────────────────────────────────────────────────
+# Short-lived 6-digit code sent to the user's email for password changes.
+# Codes expire after 10 minutes and are single-use (used=True after consumption).
+
+class PasswordResetCode(Base):
+    __tablename__ = "password_reset_codes"
+
+    id         = Column(String, primary_key=True, default=_uuid)
+    user_id    = Column(String, ForeignKey("users.id"), nullable=False)
+    code       = Column(String(6), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used       = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=_now)
+
+    user = relationship("User")
+
+
 # ─── Review ───────────────────────────────────────────────────────────────────
 
 class Review(Base):
