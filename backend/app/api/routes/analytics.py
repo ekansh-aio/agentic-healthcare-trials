@@ -10,9 +10,13 @@ POST /analytics/{ad_id}/decision         — Human accepts/rejects optimizer sug
 """
 
 import json
+import logging
 import re
+import traceback
 
 from fastapi import APIRouter, Depends, HTTPException
+
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -80,16 +84,23 @@ async def trigger_optimization(
     reviews = review_result.scalars().all()
 
     optimizer = OptimizerService(db, user.company_id)
-    suggestions = await optimizer.generate_suggestions(ad, analytics, reviews)
+    try:
+        suggestions = await optimizer.generate_suggestions(ad, analytics, reviews)
+    except Exception as exc:
+        logger.error("Optimizer generate_suggestions failed for ad %s: %s\n%s", ad_id, exc, traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Optimizer failed: {exc}")
 
-    # Log the suggestion
-    log = OptimizerLog(
-        advertisement_id=ad_id,
-        suggestions=suggestions["suggestions"],
-        context=suggestions.get("context"),
-    )
-    db.add(log)
-    await db.flush()
+    # Log the suggestion (non-fatal — don't let a DB write kill the response)
+    try:
+        log = OptimizerLog(
+            advertisement_id=ad_id,
+            suggestions=suggestions["suggestions"],
+            context=suggestions.get("context"),
+        )
+        db.add(log)
+        await db.flush()
+    except Exception as exc:
+        logger.error("Failed to persist optimizer log for ad %s: %s", ad_id, exc)
 
     return OptimizerSuggestion(
         advertisement_id=ad_id,

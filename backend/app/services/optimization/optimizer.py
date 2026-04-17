@@ -45,9 +45,15 @@ class OptimizerService:
         3. Call Claude with tightly constrained inputs and required output schema
         4. Return cost_optimization, website_optimization, advertisement_optimization
         """
-        cost_analysis    = self._analyze_cost(advertisement, analytics)
-        content_signals  = self._analyze_content_signals(advertisement, analytics)
-        reviewer_context = self._extract_reviewer_context(reviews)
+        try:
+            cost_analysis    = self._analyze_cost(advertisement, analytics)
+            content_signals  = self._analyze_content_signals(advertisement, analytics)
+            reviewer_context = self._extract_reviewer_context(reviews)
+        except Exception as exc:
+            logger.warning("Optimizer pre-analysis failed for ad %s (%s) — using empty context", advertisement.id, exc)
+            cost_analysis    = {"status": "no_data"}
+            content_signals  = {}
+            reviewer_context = {}
 
         # Use deterministic mock when:
         #   • AI backend is not configured
