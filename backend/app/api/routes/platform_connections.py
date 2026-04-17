@@ -19,6 +19,7 @@ Token strategy:
 
 import logging
 from datetime import datetime, timezone, timedelta
+from urllib.parse import quote
 
 from jose import jwt as pyjwt
 from jose.exceptions import JWTError
@@ -100,7 +101,7 @@ async def get_meta_oauth_url(
     url = (
         f"https://www.facebook.com/v21.0/dialog/oauth"
         f"?client_id={settings.META_APP_ID}"
-        f"&redirect_uri={settings.META_OAUTH_REDIRECT_URI}"
+        f"&redirect_uri={quote(settings.META_OAUTH_REDIRECT_URI, safe='')}"
         f"&scope={scopes}"
         f"&state={state}"
         f"&response_type=code"

@@ -19,7 +19,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   PageWithSidebar, SectionCard, CampaignStatusBadge,
 } from "../shared/Layout";
-import { adsAPI } from "../../services/api";
+import { adsAPI, surveyAPI } from "../../services/api";
 import {
   ArrowLeft, CheckCircle, XCircle, MessageSquare,
   Megaphone, Globe, Image, Bot, Loader2, AlertCircle,
@@ -1600,6 +1600,7 @@ const PAGE_TABS = [
   { key: "overview",      label: "Overview",      icon: LayoutDashboard },
   { key: "strategy",      label: "Strategy",      icon: Layers          },
   { key: "questionnaire", label: "Questionnaire", icon: ClipboardList   },
+  { key: "participants",  label: "Participants",  icon: Users           },
   { key: "review",        label: "Review",        icon: ClipboardCheck  },
   { key: "history",       label: "History",       icon: History         },
 ];
@@ -1657,6 +1658,9 @@ export default function ReviewerCampaignDetail() {
   const [pageTab,    setPageTab]    = useState("overview");
   const [actionTab,  setActionTab]  = useState("verdict");
   const [previewDoc, setPreviewDoc] = useState(null);
+  const [participants,        setParticipants]        = useState([]);
+  const [participantsLoading, setParticipantsLoading] = useState(false);
+  const [selectedParticipant, setSelectedParticipant] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -1676,6 +1680,15 @@ export default function ReviewerCampaignDetail() {
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (pageTab !== "participants" || !id) return;
+    setParticipantsLoading(true);
+    surveyAPI.list(id)
+      .then((data) => setParticipants(data || []))
+      .catch(() => setParticipants([]))
+      .finally(() => setParticipantsLoading(false));
+  }, [pageTab, id]);
 
   const handleActionDone = async () => { await load(); };
 
@@ -1935,6 +1948,90 @@ export default function ReviewerCampaignDetail() {
                   : <p style={{ fontSize: "0.85rem", color: "var(--color-sidebar-text)" }}>Strategy must be generated before triggering a re-write.</p>
               )}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* PARTICIPANTS */}
+      {pageTab === "participants" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          {selectedParticipant ? (
+            <SectionCard title={selectedParticipant.full_name} subtitle={`Submitted ${new Date(selectedParticipant.created_at).toLocaleString()}`}>
+              <button onClick={() => setSelectedParticipant(null)} className="btn--ghost" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.8rem", marginBottom: 20 }}>
+                <ArrowLeft size={13} /> Back to list
+              </button>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(170px,1fr))", gap: 14, marginBottom: 24 }}>
+                {[
+                  { label: "Full Name",   value: selectedParticipant.full_name },
+                  { label: "Age",         value: selectedParticipant.age },
+                  { label: "Sex",         value: selectedParticipant.sex.replace(/_/g, " ") },
+                  { label: "Phone",       value: selectedParticipant.phone },
+                  { label: "Eligibility", value: selectedParticipant.is_eligible === true ? "Eligible" : selectedParticipant.is_eligible === false ? "Not Eligible" : "Unknown" },
+                ].map(({ label, value }) => (
+                  <div key={label} style={{ padding: "12px 16px", borderRadius: 10, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)" }}>
+                    <p style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</p>
+                    <p style={{ fontSize: "0.88rem", fontWeight: 600, color: "var(--color-input-text)", textTransform: "capitalize" }}>{value}</p>
+                  </div>
+                ))}
+              </div>
+              {selectedParticipant.answers?.length > 0 && (
+                <>
+                  <p style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>Survey Answers</p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {selectedParticipant.answers.map((ans, i) => (
+                      <div key={i} style={{ padding: "12px 16px", borderRadius: 10, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)" }}>
+                        <p style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--color-input-text)", marginBottom: 6 }}>Q{i + 1}. {ans.question_text}</p>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: "0.75rem", fontWeight: 600, backgroundColor: ans.is_eligible === true ? "rgba(34,197,94,0.12)" : ans.is_eligible === false ? "rgba(239,68,68,0.1)" : "rgba(107,114,128,0.1)", color: ans.is_eligible === true ? "#16a34a" : ans.is_eligible === false ? "#dc2626" : "var(--color-sidebar-text)" }}>{ans.selected_option}</span>
+                          {ans.is_eligible === true  && <CheckCircle2 size={13} style={{ color: "#16a34a" }} />}
+                          {ans.is_eligible === false && <AlertCircle  size={13} style={{ color: "#dc2626" }} />}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </SectionCard>
+          ) : (
+            <SectionCard title="Participants" subtitle="People who completed the survey and submitted their details">
+              {participantsLoading ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "32px 0", justifyContent: "center" }}>
+                  <Loader2 size={18} style={{ animation: "spin 1s linear infinite", color: "var(--color-accent)" }} />
+                  <p style={{ fontSize: "0.85rem", color: "var(--color-sidebar-text)" }}>Loading participants…</p>
+                </div>
+              ) : participants.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "48px 0" }}>
+                  <Users size={32} style={{ color: "var(--color-card-border)", margin: "0 auto 12px" }} />
+                  <p style={{ color: "var(--color-sidebar-text)", fontSize: "0.9rem" }}>No participants yet.</p>
+                </div>
+              ) : (
+                <div style={{ borderRadius: 10, border: "1px solid var(--color-card-border)", overflow: "hidden" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.5fr 1fr 32px", padding: "10px 16px", backgroundColor: "var(--color-page-bg)", borderBottom: "1px solid var(--color-card-border)" }}>
+                    {["Name","Age","Sex","Phone","Eligibility",""].map((h) => (
+                      <span key={h} style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</span>
+                    ))}
+                  </div>
+                  {participants.map((p, idx) => (
+                    <div key={p.id} onClick={() => setSelectedParticipant(p)}
+                      style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.5fr 1fr 32px", padding: "12px 16px", cursor: "pointer", borderBottom: idx < participants.length - 1 ? "1px solid var(--color-card-border)" : "none", backgroundColor: "var(--color-card-bg)", transition: "background 0.1s" }}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-page-bg)"}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "var(--color-card-bg)"}
+                    >
+                      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-input-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.full_name}</span>
+                      <span style={{ fontSize: "0.82rem", color: "var(--color-input-text)" }}>{p.age}</span>
+                      <span style={{ fontSize: "0.82rem", color: "var(--color-input-text)", textTransform: "capitalize" }}>{p.sex.replace(/_/g," ")}</span>
+                      <span style={{ fontSize: "0.82rem", color: "var(--color-input-text)" }}>{p.phone}</span>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.75rem", fontWeight: 600, color: p.is_eligible === true ? "#16a34a" : p.is_eligible === false ? "#dc2626" : "var(--color-sidebar-text)" }}>
+                        {p.is_eligible === true  && <CheckCircle2 size={12} />}
+                        {p.is_eligible === false && <AlertCircle  size={12} />}
+                        {p.is_eligible === true ? "Eligible" : p.is_eligible === false ? "Not Eligible" : "Unknown"}
+                      </span>
+                      <ChevronDown size={14} style={{ color: "var(--color-sidebar-text)", transform: "rotate(-90deg)" }} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
           )}
         </div>
       )}
