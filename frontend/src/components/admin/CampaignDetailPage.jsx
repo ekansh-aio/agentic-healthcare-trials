@@ -3160,12 +3160,26 @@ function CampaignDetailPageInner() {
 
   // Poll GET /{adId} until updated_at changes (background task committed).
   // Used after any endpoint that fires a BackgroundTask and returns immediately.
+  //
+  // Resilient to transient 5xx/network errors: during heavy generation the
+  // backend can momentarily return 503 (ALB queue / SQLite lock) — swallow
+  // those and keep polling until the deadline.
   const pollUntilUpdated = useCallback(async (adId, beforeUpdatedAt, timeoutMs = 300_000) => {
     const deadline = Date.now() + timeoutMs;
+    let transientErrors = 0;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 4000));
-      const latest = await adsAPI.get(adId);
-      if (latest.updated_at !== beforeUpdatedAt) return latest;
+      try {
+        const latest = await adsAPI.get(adId);
+        transientErrors = 0;
+        if (latest.updated_at !== beforeUpdatedAt) return latest;
+      } catch (err) {
+        const msg = String(err?.message || "");
+        const isTransient = /HTTP 5\d\d|503|502|504|Failed to fetch|NetworkError/i.test(msg);
+        if (!isTransient) throw err;
+        transientErrors += 1;
+        if (transientErrors >= 10) throw new Error("Server is unavailable — please refresh the page.");
+      }
     }
     throw new Error("Timed out waiting for generation to complete. Please refresh the page.");
   }, []);
