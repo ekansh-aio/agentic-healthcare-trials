@@ -120,6 +120,9 @@ async def init_db():
                 "ALTER TABLE ad_analytics ADD COLUMN date_label VARCHAR(32);",
                 "ALTER TABLE ad_analytics ADD COLUMN source VARCHAR(16) DEFAULT 'local';",
                 "ALTER TABLE optimizer_logs ADD COLUMN status VARCHAR(16) DEFAULT 'done';",
+                "ALTER TABLE optimizer_logs ADD COLUMN context JSON;",
+                "ALTER TABLE optimizer_logs ADD COLUMN human_decision VARCHAR(32);",
+                "ALTER TABLE optimizer_logs ADD COLUMN applied_changes JSON;",
             ]
             for stmt in _sqlite_cols:
                 try:
@@ -188,6 +191,12 @@ async def init_db():
             "ALTER TABLE ad_analytics ADD COLUMN IF NOT EXISTS source VARCHAR(16) DEFAULT 'local';")
         await _add_column_if_missing(conn,
             "ALTER TABLE optimizer_logs ADD COLUMN IF NOT EXISTS status VARCHAR(16) DEFAULT 'done';")
+        await _add_column_if_missing(conn,
+            "ALTER TABLE optimizer_logs ADD COLUMN IF NOT EXISTS context JSON;")
+        await _add_column_if_missing(conn,
+            "ALTER TABLE optimizer_logs ADD COLUMN IF NOT EXISTS human_decision VARCHAR(32);")
+        await _add_column_if_missing(conn,
+            "ALTER TABLE optimizer_logs ADD COLUMN IF NOT EXISTS applied_changes JSON;")
 
         # chat_sessions.campaign_id — added after initial table creation.
         await _run_migration(conn,
@@ -289,7 +298,7 @@ async def init_db():
         # ALTER TYPE ... ADD VALUE cannot run inside a transaction block — use AUTOCOMMIT.
         async with engine.connect() as _ac:
             await _ac.execution_options(isolation_level="AUTOCOMMIT")
-            for new_role in ("STUDY_COORDINATOR", "PROJECT_MANAGER", "ETHICS_MANAGER"):
+            for new_role in ("STUDY_COORDINATOR", "PROJECT_MANAGER", "ETHICS_MANAGER", "PUBLISHER"):
                 try:
                     await _ac.execute(_sql(
                         f"ALTER TYPE userrole ADD VALUE IF NOT EXISTS '{new_role}';"
