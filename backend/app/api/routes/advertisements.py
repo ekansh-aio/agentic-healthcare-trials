@@ -1958,16 +1958,83 @@ async def minor_edit_strategy(
 
 # ─── Reviewer: AI Re-Strategy ─────────────────────────────────────────────────
 
+async def _bg_rewrite_strategy(
+    ad_id: str,
+    company_id: str,
+    reviewer_id: str,
+    instructions: str,
+    restore_status: AdStatus,
+) -> None:
+    """
+    Background task: run Curator rewrite, then restore the campaign to its
+    pre-rewrite status (UNDER_REVIEW or STRATEGY_CREATED) so the PM's queue
+    position is preserved. On failure, also restores original status.
+    """
+    from app.db.database import async_session_factory
+    try:
+        async with async_session_factory() as db:
+            result = await db.execute(select(Advertisement).where(Advertisement.id == ad_id))
+            ad = result.scalar_one_or_none()
+            if not ad:
+                return
+
+            company_docs_result = await db.execute(
+                select(CompanyDocument).where(CompanyDocument.company_id == company_id)
+            )
+            protocol_docs_result = await db.execute(
+                select(AdvertisementDocument).where(
+                    AdvertisementDocument.advertisement_id == ad_id,
+                    AdvertisementDocument.company_id == company_id,
+                )
+            )
+            all_docs = sorted(
+                list(company_docs_result.scalars().all()) + list(protocol_docs_result.scalars().all()),
+                key=lambda d: d.priority, reverse=True,
+            )
+
+            curator = CuratorService(db, company_id)
+            strategy = await curator.generate_strategy(ad, all_docs, extra_instructions=instructions)
+
+            ad.strategy_json = strategy
+            flag_modified(ad, "strategy_json")
+            # Restore to original state — preserves PM's review queue position
+            ad.status = restore_status
+
+            preview = instructions[:120] + ("…" if len(instructions) > 120 else "")
+            db.add(Review(
+                advertisement_id=ad_id,
+                reviewer_id=reviewer_id,
+                review_type="system",
+                status="pending",
+                comments=f"AI Re-Strategy completed: '{preview}'",
+            ))
+            await db.commit()
+    except Exception as e:
+        logger.error("Background rewrite-strategy failed for ad %s: %s", ad_id, e, exc_info=True)
+        # Restore original status so the campaign isn't stuck in OPTIMIZING
+        try:
+            from app.db.database import async_session_factory as _sf
+            async with _sf() as db2:
+                result = await db2.execute(select(Advertisement).where(Advertisement.id == ad_id))
+                ad = result.scalar_one_or_none()
+                if ad and ad.status == AdStatus.OPTIMIZING:
+                    ad.status = restore_status
+                    await db2.commit()
+        except Exception:
+            pass
+
+
 @router.post("/{ad_id}/rewrite-strategy", response_model=AdvertisementOut)
 async def rewrite_strategy(
     ad_id: str,
     body: RewriteStrategyRequest,
+    background_tasks: BackgroundTasks,
     user: User = Depends(require_roles([UserRole.PROJECT_MANAGER, UserRole.ETHICS_MANAGER])),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Trigger the Curator to rewrite the entire strategy using reviewer instructions.
-    Appends a system audit review recording the action.
+    Kick off async strategy rewrite. Returns immediately with status=optimizing.
+    Frontend polls GET /{ad_id} until status returns to its previous value.
     """
     result = await db.execute(
         select(Advertisement).where(
@@ -1986,50 +2053,18 @@ async def rewrite_strategy(
             detail=f"Strategy can only be rewritten from STRATEGY_CREATED, UNDER_REVIEW, or ETHICS_REVIEW, not '{ad.status.value}'",
         )
 
-    # Load docs (same as generate-strategy)
-    company_docs_result = await db.execute(
-        select(CompanyDocument).where(CompanyDocument.company_id == user.company_id)
-    )
-    company_docs = company_docs_result.scalars().all()
-
-    protocol_docs_result = await db.execute(
-        select(AdvertisementDocument).where(
-            AdvertisementDocument.advertisement_id == ad_id,
-            AdvertisementDocument.company_id == user.company_id,
-        )
-    )
-    protocol_docs = protocol_docs_result.scalars().all()
-
-    all_docs = sorted(
-        list(company_docs) + list(protocol_docs),
-        key=lambda d: d.priority,
-        reverse=True,
-    )
-
-    curator = CuratorService(db, user.company_id)
-    try:
-        strategy = await curator.generate_strategy(ad, all_docs, extra_instructions=body.instructions)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error("Rewrite strategy failed for ad %s: %s", ad_id, e, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Strategy rewrite failed: {e}")
-
-    ad.strategy_json = strategy
-    flag_modified(ad, "strategy_json")
-    ad.status = AdStatus.STRATEGY_CREATED
-
-    # Audit review
-    preview = body.instructions[:120] + ("…" if len(body.instructions) > 120 else "")
-    audit = Review(
-        advertisement_id=ad_id,
-        reviewer_id=user.id,
-        review_type="system",
-        status="pending",
-        comments=f"AI Re-Strategy triggered by reviewer: '{preview}'",
-    )
-    db.add(audit)
+    restore_status = ad.status  # remember where to return after rewrite
+    ad.status = AdStatus.OPTIMIZING
     await db.flush()
+
+    background_tasks.add_task(
+        _bg_rewrite_strategy,
+        ad_id,
+        user.company_id,
+        user.id,
+        body.instructions,
+        restore_status,
+    )
     return ad
 
 

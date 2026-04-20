@@ -1415,9 +1415,20 @@ function AIReStrategyPanel({ adId, onRewritten }) {
     if (!instructions.trim()) { setError("Instructions are required."); return; }
     if (!confirmed) { setError("Please confirm you want to replace the current strategy."); return; }
     setLoading(true); setError(null); setSuccess(false);
-    reProgress.start("Re-writing strategy…", 25000);
+    reProgress.start("Re-writing strategy…", 60000);
     try {
+      // Kicks off background job immediately — returns with status=optimizing
       await adsAPI.rewriteStrategy(adId, { instructions: instructions.trim() });
+
+      // Poll until background job finishes (status leaves "optimizing")
+      let attempts = 0;
+      while (attempts < 120) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const fresh = await adsAPI.get(adId);
+        if (fresh.status !== "optimizing") break;
+        attempts++;
+      }
+
       reProgress.complete();
       setSuccess(true);
       setInstructions("");
