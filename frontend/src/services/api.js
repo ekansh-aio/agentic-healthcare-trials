@@ -573,15 +573,11 @@ export const adsAPI = {
     request(`/advertisements/${adId}/host-page`, { method: "POST" }),
 
   // Returns URL strings (not API calls) — used for preview/download <a> hrefs.
-  // Token passed as query param so the browser can open them directly.
-  websitePreviewUrl: (adId) => {
-    const token = localStorage.getItem("token");
-    return `/api/advertisements/${adId}/website?token=${encodeURIComponent(token)}`;
-  },
-  websiteDownloadUrl: (adId) => {
-    const token = localStorage.getItem("token");
-    return `/api/advertisements/${adId}/website?download=true&token=${encodeURIComponent(token)}`;
-  },
+  // No token needed: landing page is public (no secrets, safe as Meta Ads redirect URL).
+  websitePreviewUrl: (adId) =>
+    `/api/advertisements/${adId}/website`,
+  websiteDownloadUrl: (adId) =>
+    `/api/advertisements/${adId}/website?download=true`,
 
   minorEditStrategy: (adId, data) =>
     request(`/advertisements/${adId}/minor-edit`, {

@@ -780,6 +780,13 @@ async def _bg_submit_for_review(ad_id: str, company_id: str) -> None:
             ad.ad_details   = review_output.get("ad_details")
             flag_modified(ad, "website_reqs")
             flag_modified(ad, "ad_details")
+            if ad.status != AdStatus.STRATEGY_CREATED:
+                logger.warning(
+                    "Skipping UNDER_REVIEW transition for ad %s — state is '%s', expected STRATEGY_CREATED",
+                    ad_id, ad.status.value,
+                )
+                await db.commit()
+                return
             ad.status = AdStatus.UNDER_REVIEW
             await db.commit()
     except Exception as e:
@@ -853,6 +860,12 @@ async def generate_strategy(
     if not ad:
         raise HTTPException(status_code=404, detail="Advertisement not found")
 
+    if ad.status not in (AdStatus.DRAFT, AdStatus.STRATEGY_CREATED):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Strategy can only be generated from DRAFT or STRATEGY_CREATED, not '{ad.status.value}'",
+        )
+
     ad.status = AdStatus.GENERATING
     await db.flush()
     background_tasks.add_task(_bg_generate_strategy, ad_id, user.company_id)
@@ -878,6 +891,12 @@ async def submit_for_review(
     ad = result.scalar_one_or_none()
     if not ad:
         raise HTTPException(status_code=404, detail="Advertisement not found")
+
+    if ad.status != AdStatus.STRATEGY_CREATED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Campaign can only be submitted for review from STRATEGY_CREATED, not '{ad.status.value}'",
+        )
 
     background_tasks.add_task(_bg_submit_for_review, ad_id, user.company_id)
     return ad
@@ -905,14 +924,26 @@ async def create_review(
     ad = ad_result.scalar_one_or_none()
     if ad:
         if body.status == "approved":
-            # Strategy approved by PM → send to Ethics Manager queue
             if body.review_type == "strategy":
+                if ad.status != AdStatus.UNDER_REVIEW:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Strategy review approval requires UNDER_REVIEW state, not '{ad.status.value}'",
+                    )
                 ad.status = AdStatus.ETHICS_REVIEW
-            # Ethics approved → ready for publishing
             elif body.review_type == "ethics":
+                if ad.status != AdStatus.ETHICS_REVIEW:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Ethics review approval requires ETHICS_REVIEW state, not '{ad.status.value}'",
+                    )
                 ad.status = AdStatus.APPROVED
         elif body.status in ("revision", "rejected"):
-            # Any rejection/revision → back to the general review queue
+            if ad.status not in (AdStatus.UNDER_REVIEW, AdStatus.ETHICS_REVIEW):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Revision/rejection requires UNDER_REVIEW or ETHICS_REVIEW state, not '{ad.status.value}'",
+                )
             ad.status = AdStatus.UNDER_REVIEW
 
     await db.flush()
@@ -1727,22 +1758,18 @@ async def serve_protocol_document_file(
 async def serve_website(
     ad_id: str,
     download: bool = False,
-    user: User = Depends(_user_from_query_token_ads),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Serve the generated HTML landing page.
+    Serve the generated HTML landing page — public, no auth required.
+    The page contains no secrets or PII; it is safe to share as a Meta Ads redirect URL.
     ?download=true → Content-Disposition: attachment (triggers browser download).
-    Accessible via the existing /api proxy — no separate /outputs proxy needed.
     """
     from fastapi.responses import HTMLResponse, Response
     import os as _os
 
     result = await db.execute(
-        select(Advertisement).where(
-            Advertisement.id == ad_id,
-            Advertisement.company_id == user.company_id,
-        )
+        select(Advertisement).where(Advertisement.id == ad_id)
     )
     ad = result.scalar_one_or_none()
     if not ad:
@@ -1951,6 +1978,13 @@ async def rewrite_strategy(
     ad = result.scalar_one_or_none()
     if not ad:
         raise HTTPException(status_code=404, detail="Advertisement not found")
+
+    _rewritable = (AdStatus.STRATEGY_CREATED, AdStatus.UNDER_REVIEW, AdStatus.ETHICS_REVIEW)
+    if ad.status not in _rewritable:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Strategy can only be rewritten from STRATEGY_CREATED, UNDER_REVIEW, or ETHICS_REVIEW, not '{ad.status.value}'",
+        )
 
     # Load docs (same as generate-strategy)
     company_docs_result = await db.execute(

@@ -3690,7 +3690,9 @@ function PublisherAnalytics({ ads, suggestions, setSuggestions, optimizing, setO
       return `$${totals.spend.toFixed(2)}`;
 
     if (m.includes("conversion rate"))
-      return totals.clicks > 0 ? `${((totals.conversions / totals.clicks) * 100).toFixed(2)}%` : "–";
+      return totals.clicks > 0
+        ? `${Math.min((totals.conversions / totals.clicks) * 100, 100).toFixed(2)}%`
+        : "–";
 
     if (m.includes("conversion") || m.includes("enrolled participant") || m.includes("total enrolled") || m.includes("enrolled"))
       return totals.conversions.toLocaleString();
@@ -3925,7 +3927,7 @@ function PublisherAnalytics({ ads, suggestions, setSuggestions, optimizing, setO
 
         // Meta-derived chatbot conversion rate: (conversations / clicks) × 100
         const chatbotConvRate = totalConvs > 0 && totals.clicks > 0
-          ? ((totalConvs / totals.clicks) * 100).toFixed(2) + "%"
+          ? `${Math.min((totalConvs / totals.clicks) * 100, 100).toFixed(2)}%`
           : "–";
 
         const metricCards = [
