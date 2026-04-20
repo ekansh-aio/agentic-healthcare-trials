@@ -1,0 +1,57 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ECRAuth",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetAuthorizationToken"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ECRPush",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:BatchGetImage",
+        "ecr:InitiateLayerUpload",
+        "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload",
+        "ecr:PutImage"
+      ],
+      "Resource": [
+        "arn:aws:ecr:us-east-1:809411919411:repository/agentic_healthcare/backend",
+        "arn:aws:ecr:us-east-1:809411919411:repository/agentic_healthcare/frontend"
+      ]
+    },
+    {
+      "Sid": "ECSTaskDefinitions",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeTaskDefinition",
+        "ecs:RegisterTaskDefinition"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ECSServiceUpdate",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:UpdateService",
+        "ecs:DescribeServices"
+      ],
+      "Resource": [
+        "arn:aws:ecs:us-east-1:809411919411:service/agentic-healthcare-cluster/backend-service",
+        "arn:aws:ecs:us-east-1:809411919411:service/agentic-healthcare-cluster/frontend-service"
+      ]
+    },
+    {
+      "Sid": "PassTaskRole",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::809411919411:role/agentic-healthcare-task-role"
+    }
+  ]
+}

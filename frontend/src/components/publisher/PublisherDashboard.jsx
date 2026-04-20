@@ -15,7 +15,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { PageWithSidebar, SectionCard, MetricSummaryCard, CampaignStatusBadge } from "../shared/Layout";
 import { adsAPI, analyticsAPI, platformConnectionsAPI, surveyAPI } from "../../services/api";
 import {
-  Send, Globe, Image, BarChart3, Sparkles, Copy,
+  Send, Globe, Image, BarChart3, Sparkles, Copy, Server,
   CheckCircle, Rocket, ChevronDown, ChevronUp, Zap, X, ImageOff,
   Share2, UploadCloud, ExternalLink, Download, Eye, AlertCircle,
   CheckCircle2, Loader2, Mic, PhoneCall, PhoneOff, Volume2, Radio, MessageSquare,
@@ -346,35 +346,10 @@ export default function PublisherDashboard() {
           seeds.currency = "USD";
         }
 
-        // AI-suggest browser add-on from campaign signals
+        // Default browser add-on to None; user can switch to WhatsApp/Phone manually
         if (!existing.addon_type) {
-          const strat      = ad?.strategy_json || {};
-          const botConfig  = ad?.bot_config    || {};
-          const adTypes    = ad?.ad_type        || [];
-          const ctaLc      = (strat.cta || "").toLowerCase();
-          // E.164 number stored when the ElevenLabs agent was provisioned
-          const voicePhone = botConfig.voice_phone_number || "";
-
-          let suggestedAddon = "";
-          let suggestedPhone = "";
-
-          if (strat.whatsapp_number || ctaLc.includes("whatsapp")) {
-            suggestedAddon = "whatsapp";
-            suggestedPhone = strat.whatsapp_number || strat.phone_number || "";
-          } else if (
-            adTypes.includes("voicebot") ||
-            adTypes.includes("phone") ||
-            ctaLc.includes("call") ||
-            voicePhone
-          ) {
-            // Phone call → voicebot. Number is resolved server-side from bot_config.
-            suggestedAddon = "phone";
-            // Only seed a phone number for WhatsApp (phone call uses voicebot number automatically)
-          }
-
-          seeds.addon_type          = suggestedAddon;
-          seeds._addon_ai_suggested = !!suggestedAddon;
-          if (suggestedPhone) seeds.addon_phone = suggestedPhone;
+          seeds.addon_type          = "";
+          seeds._addon_ai_suggested = false;
         }
 
         return Object.keys(seeds).length
@@ -539,12 +514,10 @@ export default function PublisherDashboard() {
       {activeTab === "deploy" && (
         <DeployTab
           ads={ads}
-          deployExpanded={deployExpanded}
-          deployForms={deployForms}
-          deployStatus={deployStatus}
-          onSelectPlatform={handleDeploySelect}
-          onUpdateForm={updateDeployForm}
-          onDeploy={handleDeploy}
+          hostingId={hostingId}
+          hostError={hostError}
+          onHost={handleHostPage}
+          onAdUpdated={(updated) => setAds((p) => p.map((a) => (a.id === updated.id ? updated : a)))}
         />
       )}
 
@@ -1588,7 +1561,7 @@ function VoicebotConfig({ ad }) {
 }
 
 // ─── Deploy Tab ───────────────────────────────────────────────────────────────
-function DeployTab({ ads, deployExpanded, deployForms, deployStatus, onSelectPlatform, onUpdateForm, onDeploy }) {
+function DeployTab({ ads, hostingId, hostError, onHost }) {
   const deployable = ads.filter(
     (a) => (a.status === "approved" || a.status === "published") && hasType(a, "website")
   );
@@ -1608,79 +1581,89 @@ function DeployTab({ ads, deployExpanded, deployForms, deployStatus, onSelectPla
 
   return (
     <div className="space-y-4">
-      {deployable.map((ad) => (
-        <SectionCard key={ad.id} title={ad.title} subtitle={`${typeLabel(ad)} · ${ad.status}`}>
+      {deployable.map((ad) => {
+        const isHosting  = hostingId === ad.id;
+        const hostedUrl  = ad.hosted_url ? `${window.location.origin}${ad.hosted_url}` : null;
 
-          {/* Website readiness row */}
-          {ad.output_url ? (
-            <div style={{
-              display: "flex", alignItems: "center", gap: "12px",
-              padding: "12px 16px", borderRadius: "10px", marginBottom: "20px",
-              border: "1px solid var(--color-card-border)",
-              backgroundColor: "var(--color-card-bg)",
-            }}>
-              <Globe size={15} style={{ color: "var(--color-accent)", flexShrink: 0 }} />
-              <p style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-input-text)", flex: 1 }}>
-                Landing page ready
-              </p>
-              <a href={adsAPI.websitePreviewUrl(ad.id)} target="_blank" rel="noreferrer" className="btn--inline-action--ghost">
-                <Eye size={11} /> Preview
-              </a>
-              <a href={adsAPI.websiteDownloadUrl(ad.id)} className="btn--inline-action--ghost">
-                <Download size={11} /> Download
-              </a>
-            </div>
-          ) : (
-            <div style={{
-              display: "flex", alignItems: "center", gap: "12px",
-              padding: "12px 16px", borderRadius: "10px", marginBottom: "20px",
-              border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)",
-            }}>
-              <AlertCircle size={14} style={{ color: "var(--color-sidebar-text)", flexShrink: 0 }} />
-              <p style={{ fontSize: "0.82rem", color: "var(--color-sidebar-text)", flex: 1 }}>
-                Website not yet generated — the Study Coordinator generates assets during campaign creation
-              </p>
-            </div>
-          )}
+        return (
+          <SectionCard key={ad.id} title={ad.title} subtitle={`${typeLabel(ad)} · ${ad.status}`}>
+            {ad.output_url ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
 
-          {/* Platform tiles */}
-          <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-sidebar-text)", marginBottom: "10px" }}>
-            Publish on
-          </p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "10px", marginBottom: "16px" }}>
-            {DEPLOY_PLATFORMS.map((platform) => {
-              const isSelected = deployExpanded?.adId === ad.id && deployExpanded?.platformId === platform.id;
-              const status     = deployStatus[`${ad.id}_${platform.id}`];
-              return (
-                <DeployPlatformTile
-                  key={platform.id}
-                  platform={platform}
-                  selected={isSelected}
-                  status={status}
-                  disabled={!ad.output_url}
-                  onClick={() => onSelectPlatform(ad.id, platform.id)}
-                />
-              );
-            })}
-          </div>
+                {/* Landing page row */}
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 12,
+                  padding: "12px 16px", borderRadius: 10,
+                  border: "1px solid var(--color-card-border)",
+                  backgroundColor: "var(--color-card-bg)",
+                }}>
+                  <Server size={15} style={{ color: "var(--color-accent)", flexShrink: 0 }} />
+                  <p style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-input-text)", flex: 1 }}>
+                    Landing page ready
+                  </p>
+                  <button
+                    onClick={() => onHost(ad.id)}
+                    disabled={isHosting}
+                    className="btn--inline-action--accent"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 5, opacity: isHosting ? 0.7 : 1 }}
+                  >
+                    {isHosting
+                      ? <Loader2 size={11} style={{ animation: "spin 0.75s linear infinite" }} />
+                      : <Server size={11} />}
+                    {isHosting ? "Hosting…" : ad.hosted_url ? "Re-host" : "Host"}
+                  </button>
+                  <a href={adsAPI.websiteDownloadUrl(ad.id)} className="btn--inline-action--ghost">
+                    <Download size={11} /> Download
+                  </a>
+                </div>
 
-          {/* Inline config form */}
-          {deployExpanded?.adId === ad.id && (() => {
-            const platform = DEPLOY_PLATFORMS.find((p) => p.id === deployExpanded.platformId);
-            if (!platform) return null;
-            const fk = `${ad.id}_${platform.id}`;
-            return (
-              <DeployConfigForm
-                platform={platform}
-                formData={deployForms[fk] || {}}
-                status={deployStatus[fk]}
-                onChange={(key, val) => onUpdateForm(ad.id, platform.id, key, val)}
-                onDeploy={() => onDeploy(ad.id, platform)}
-              />
-            );
-          })()}
-        </SectionCard>
-      ))}
+                {/* Hosted URL bar */}
+                {hostedUrl && (
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "10px 14px", borderRadius: 8,
+                    backgroundColor: "rgba(16,185,129,0.06)",
+                    border: "1px solid rgba(16,185,129,0.25)",
+                  }}>
+                    <Globe size={13} style={{ color: "var(--color-accent)", flexShrink: 0 }} />
+                    <a
+                      href={hostedUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ fontSize: "0.8rem", color: "var(--color-accent)", flex: 1, wordBreak: "break-all", textDecoration: "none", fontWeight: 500 }}
+                    >
+                      {hostedUrl}
+                    </a>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(hostedUrl)}
+                      title="Copy URL"
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-sidebar-text)", padding: 2, flexShrink: 0 }}
+                    >
+                      <Copy size={12} />
+                    </button>
+                  </div>
+                )}
+
+                {/* Host error */}
+                {hostError?.[ad.id] && (
+                  <p style={{ fontSize: "0.78rem", color: "#ef4444" }}>{hostError[ad.id]}</p>
+                )}
+              </div>
+            ) : (
+              <div style={{
+                display: "flex", alignItems: "center", gap: 12,
+                padding: "12px 16px", borderRadius: 10,
+                border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)",
+              }}>
+                <AlertCircle size={14} style={{ color: "var(--color-sidebar-text)", flexShrink: 0 }} />
+                <p style={{ fontSize: "0.82rem", color: "var(--color-sidebar-text)", flex: 1 }}>
+                  Website not yet generated — ask the Study Coordinator to generate the campaign website
+                </p>
+              </div>
+            )}
+          </SectionCard>
+        );
+      })}
     </div>
   );
 }

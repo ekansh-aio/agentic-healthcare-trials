@@ -1,0 +1,196 @@
+name: Deploy to AWS ECS (clinadspro.com)
+
+# Triggers on push to either branch:
+#   dev  → deploys to production (clinadspro.com)
+#   main → deploys to production (clinadspro.com)
+# Remove the branch you don't want triggering deploys.
+on:
+  push:
+    branches:
+      - dev
+      - main
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: 809411919411.dkr.ecr.us-east-1.amazonaws.com
+  BACKEND_REPO: agentic_healthcare/backend
+  FRONTEND_REPO: agentic_healthcare/frontend
+  ECS_CLUSTER: agentic-healthcare-cluster
+  BACKEND_SERVICE: backend-service
+  FRONTEND_SERVICE: frontend-service
+  BACKEND_TASK_FAMILY: agentic-healthcare-backend
+  FRONTEND_TASK_FAMILY: agentic-healthcare-frontend
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    # Required for OIDC token (optional but good practice)
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. AWS credentials ─────────────────────────────────────────────────
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ── 3. ECR login ───────────────────────────────────────────────────────
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ── 4. Derive image tag from Git SHA (e.g. sha-a1b2c3d) ───────────────
+      - name: Set image tag
+        run: echo "IMAGE_TAG=sha-$(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_ENV
+
+      # ── 5. Build & push backend ────────────────────────────────────────────
+      # Context is repo root so skills/ and backend/ are both in scope
+      - name: Build and push backend image
+        run: |
+          docker build -f backend/Dockerfile \
+            -t $ECR_REGISTRY/$BACKEND_REPO:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$BACKEND_REPO:latest \
+            .
+          docker push $ECR_REGISTRY/$BACKEND_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$BACKEND_REPO:latest
+
+      # ── 6. Build & push frontend ───────────────────────────────────────────
+      - name: Build and push frontend image
+        run: |
+          docker build \
+            -t $ECR_REGISTRY/$FRONTEND_REPO:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$FRONTEND_REPO:latest \
+            ./frontend
+          docker push $ECR_REGISTRY/$FRONTEND_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$FRONTEND_REPO:latest
+
+      # ── 7. Register new backend task definition ────────────────────────────
+      # Reads the live task def from ECS (preserves EFS volumes, secrets, etc.)
+      # and patches only the container image tag.
+      - name: Register backend task definition
+        run: |
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition $BACKEND_TASK_FAMILY \
+            --region $AWS_REGION \
+            --query 'taskDefinition' \
+            --output json | jq 'del(
+              .taskDefinitionArn,
+              .revision,
+              .status,
+              .requiresAttributes,
+              .compatibilities,
+              .registeredAt,
+              .registeredBy
+            )')
+
+          NEW_TASK_DEF=$(echo "$TASK_DEF" | jq \
+            --arg IMAGE "$ECR_REGISTRY/$BACKEND_REPO:$IMAGE_TAG" \
+            '.containerDefinitions[0].image = $IMAGE')
+
+          NEW_REVISION=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW_TASK_DEF" \
+            --region $AWS_REGION \
+            --query 'taskDefinition.revision' \
+            --output text)
+
+          echo "BACKEND_REVISION=$NEW_REVISION" >> $GITHUB_ENV
+          echo "Registered $BACKEND_TASK_FAMILY:$NEW_REVISION"
+
+      # ── 8. Register new frontend task definition ───────────────────────────
+      - name: Register frontend task definition
+        run: |
+          TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition $FRONTEND_TASK_FAMILY \
+            --region $AWS_REGION \
+            --query 'taskDefinition' \
+            --output json | jq 'del(
+              .taskDefinitionArn,
+              .revision,
+              .status,
+              .requiresAttributes,
+              .compatibilities,
+              .registeredAt,
+              .registeredBy
+            )')
+
+          NEW_TASK_DEF=$(echo "$TASK_DEF" | jq \
+            --arg IMAGE "$ECR_REGISTRY/$FRONTEND_REPO:$IMAGE_TAG" \
+            '.containerDefinitions[0].image = $IMAGE')
+
+          NEW_REVISION=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW_TASK_DEF" \
+            --region $AWS_REGION \
+            --query 'taskDefinition.revision' \
+            --output text)
+
+          echo "FRONTEND_REVISION=$NEW_REVISION" >> $GITHUB_ENV
+          echo "Registered $FRONTEND_TASK_FAMILY:$NEW_REVISION"
+
+      # ── 9. Deploy backend ──────────────────────────────────────────────────
+      - name: Deploy backend service
+        run: |
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $BACKEND_SERVICE \
+            --task-definition $BACKEND_TASK_FAMILY:$BACKEND_REVISION \
+            --force-new-deployment \
+            --region $AWS_REGION
+
+      # ── 10. Deploy frontend ────────────────────────────────────────────────
+      - name: Deploy frontend service
+        run: |
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $FRONTEND_SERVICE \
+            --task-definition $FRONTEND_TASK_FAMILY:$FRONTEND_REVISION \
+            --force-new-deployment \
+            --region $AWS_REGION
+
+      # ── 11. Wait for rollout to complete ───────────────────────────────────
+      # Times out after ~10 min (ECS default). Fails the job if tasks crash.
+      - name: Wait for ECS services to stabilize
+        run: |
+          echo "Waiting for rollout... (may take 3–8 minutes)"
+          aws ecs wait services-stable \
+            --cluster $ECS_CLUSTER \
+            --services $BACKEND_SERVICE $FRONTEND_SERVICE \
+            --region $AWS_REGION
+
+      # ── 12. Invalidate CloudFront cache ────────────────────────────────────
+      # Finds the distribution by domain and creates a /* invalidation so
+      # browsers always get the latest index.html and JS bundles after deploy.
+      - name: Invalidate CloudFront cache
+        run: |
+          DIST_ID=$(aws cloudfront list-distributions \
+            --query "DistributionList.Items[?contains(Aliases.Items, 'clinadspro.com') || DomainName=='d2s8k22yb5c8me.cloudfront.net'].Id" \
+            --output text 2>/dev/null || true)
+          if [ -z "$DIST_ID" ]; then
+            DIST_ID=$(aws cloudfront list-distributions \
+              --query "DistributionList.Items[?DomainName=='d2s8k22yb5c8me.cloudfront.net'].Id" \
+              --output text 2>/dev/null || true)
+          fi
+          if [ -n "$DIST_ID" ]; then
+            aws cloudfront create-invalidation \
+              --distribution-id "$DIST_ID" \
+              --paths "/*" \
+              --region us-east-1
+            echo "CloudFront invalidation created for $DIST_ID"
+          else
+            echo "⚠️  CloudFront distribution not found — skipping invalidation"
+          fi
+
+      # ── 13. Summary ────────────────────────────────────────────────────────
+      - name: Deployment summary
+        run: |
+          echo "✅ Deploy complete"
+          echo "   Backend  → $BACKEND_TASK_FAMILY:$BACKEND_REVISION  (image: $IMAGE_TAG)"
+          echo "   Frontend → $FRONTEND_TASK_FAMILY:$FRONTEND_REVISION  (image: $IMAGE_TAG)"
+          echo "   Live URL → https://clinadspro.com"

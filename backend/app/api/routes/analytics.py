@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
 
-from app.db.database import get_db
+from app.db.database import get_db, async_session_factory
 from app.models.models import (
     User, UserRole, Advertisement, AdAnalytics, OptimizerLog, Review
 )
@@ -98,7 +98,6 @@ async def trigger_optimization(
     ad_id: str,
     background_tasks: BackgroundTasks,
     user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PUBLISHER, UserRole.PROJECT_MANAGER])),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     Kick off async optimizer run. Returns immediately with {"log_id", "status": "pending"}.
@@ -163,7 +162,6 @@ async def regenerate_optimizer_item(
     ad_id: str,
     body: RegenerateItemRequest,
     user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PUBLISHER, UserRole.PROJECT_MANAGER])),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     Regenerate a single optimization item using its stored AI prompt.

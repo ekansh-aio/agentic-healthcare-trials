@@ -63,7 +63,7 @@ SURVEY (always include):
   Nav:        Place the voice button on the LEFT and the prev/next buttons on the RIGHT inside one nav row:
               <div class="survey-nav">
                 <div class="survey-voice-row">
-                  <button class="btn-voice-call" id="survey-voice-btn">&#128222; Speak to an Agent</button>
+                  <button class="btn-voice-call" id="survey-voice-btn">&#128222; Speak to Us</button>
                 </div>
                 <div class="survey-nav-right">
                   <button class="btn-survey-prev" id="survey-prev">&#8592; Back</button>
@@ -467,7 +467,7 @@ class WebsiteAgentService:
     setTimeout(function () {
       var regSec = document.getElementById('reg-section');
       if (regSec) {
-        regSec.style.display = '';
+        regSec.style.display = 'block';
         var regNote = document.getElementById('reg-note');
         if (regNote) {
           regNote.style.display = 'block';
@@ -646,6 +646,131 @@ class WebsiteAgentService:
 }})();
 </script>"""
 
+        # Registration form — injected into body before the interaction section
+        reg_form_html = f"""
+<section id="reg-section">
+  <div class="reg-card">
+    <h2 class="reg-title">Your Details</h2>
+    <p class="reg-sub">Help the study team get in touch with you.</p>
+    <div id="reg-note" class="reg-note ineligible" style="display:none"></div>
+    <div class="reg-error" id="reg-error"></div>
+    <div class="reg-done" id="reg-done">
+      &#10003;&ensp;Thank you! Your details have been received.<br>
+      A member of the study team will be in touch with you shortly.
+    </div>
+    <div id="reg-form-fields">
+      <div class="reg-field">
+        <label class="reg-label" for="reg-name">Full Name *</label>
+        <input class="reg-input" id="reg-name" type="text" placeholder="e.g. Jane Smith" autocomplete="name" />
+      </div>
+      <div class="reg-row">
+        <div class="reg-field">
+          <label class="reg-label" for="reg-age">Age *</label>
+          <input class="reg-input" id="reg-age" type="number" placeholder="e.g. 34" min="1" max="120" />
+        </div>
+        <div class="reg-field">
+          <label class="reg-label" for="reg-sex">Sex *</label>
+          <select class="reg-select" id="reg-sex">
+            <option value="">Select&hellip;</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="other">Other</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </select>
+        </div>
+      </div>
+      <div class="reg-field">
+        <label class="reg-label" for="reg-phone">Phone Number *</label>
+        <input class="reg-input" id="reg-phone" type="tel" placeholder="e.g. +1 555 123 4567" autocomplete="tel" />
+      </div>
+      <button class="reg-btn" id="reg-submit">Submit Details</button>
+      <p class="reg-privacy">Your information will only be used by the study team to contact you about this trial. It will not be shared with third parties.</p>
+    </div>
+  </div>
+</section>
+<script>
+(function () {{
+  var AD_ID    = '{ad_id}';
+  var API_BASE = window.location.origin;
+
+  var nameEl   = document.getElementById('reg-name');
+  var ageEl    = document.getElementById('reg-age');
+  var sexEl    = document.getElementById('reg-sex');
+  var phoneEl  = document.getElementById('reg-phone');
+  var submitEl = document.getElementById('reg-submit');
+  var errorEl  = document.getElementById('reg-error');
+  var doneEl   = document.getElementById('reg-done');
+  var fieldsEl = document.getElementById('reg-form-fields');
+  var noteEl   = document.getElementById('reg-note');
+
+  /* Note content is set by survey JS before revealing #reg-section */
+
+  function showError(msg) {{
+    if (!errorEl) return;
+    errorEl.textContent = msg;
+    errorEl.style.display = 'block';
+  }}
+  function hideError() {{ if (errorEl) errorEl.style.display = 'none'; }}
+
+  if (!submitEl) return;
+  submitEl.addEventListener('click', async function () {{
+    hideError();
+    var name  = (nameEl  && nameEl.value.trim())  || '';
+    var age   = parseInt((ageEl   && ageEl.value)   || '', 10);
+    var sex   = (sexEl   && sexEl.value)   || '';
+    var phone = (phoneEl && phoneEl.value.trim())  || '';
+
+    if (!name)                     {{ showError('Please enter your full name.');   return; }}
+    if (isNaN(age) || age < 1 || age > 120) {{ showError('Please enter a valid age.');    return; }}
+    if (!sex)                      {{ showError('Please select your sex.');         return; }}
+    if (!phone || phone.length < 5){{ showError('Please enter a valid phone number.'); return; }}
+
+    submitEl.disabled    = true;
+    submitEl.textContent = 'Submitting\u2026';
+
+    /* Get answers + eligibility captured by survey engine */
+    var answers  = window._surveyAnswers  || [];
+    var eligible = window._surveyEligible || false;
+
+    try {{
+      var resp = await fetch(API_BASE + '/api/advertisements/' + AD_ID + '/survey-responses', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{
+          full_name:   name,
+          age:         age,
+          sex:         sex,
+          phone:       phone,
+          answers:     answers,
+          is_eligible: eligible
+        }})
+      }});
+      if (!resp.ok) {{
+        var err = await resp.json().catch(function () {{ return {{}}; }});
+        throw new Error((err.detail) || ('Submission failed (HTTP ' + resp.status + ')'));
+      }}
+      /* Success */
+      if (fieldsEl) fieldsEl.style.display = 'none';
+      if (doneEl)   doneEl.style.display   = 'block';
+      if (noteEl)   noteEl.style.display   = 'none';
+
+      /* Reveal interaction section after brief delay */
+      setTimeout(function () {{
+        var ia = document.getElementById('interaction-reveal');
+        if (ia) {{
+          ia.style.display = '';
+          ia.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+        }}
+      }}, 2000);
+    }} catch (e) {{
+      showError(e.message || 'Something went wrong. Please try again.');
+      submitEl.disabled    = false;
+      submitEl.textContent = 'Submit Details';
+    }}
+  }});
+}})();
+</script>"""
+
         # Hide interaction section initially (JS reveals it post-survey)
         if has_interact:
             body = body.replace(
@@ -653,6 +778,20 @@ class WebsiteAgentService:
                 'id="interaction-reveal" style="display:none"',
                 1,
             )
+
+        # Inject registration form at the right position:
+        # before the interaction section → before the footer → or appended before </body>
+        _inject_marker = 'id="interaction-reveal"'
+        _footer_marker = '<footer'
+        if _inject_marker in body:
+            _pos = body.index(_inject_marker)
+            _open = body.rfind('<', 0, _pos)
+            body = body[:_open] + reg_form_html + '\n' + body[_open:]
+        elif _footer_marker in body:
+            _pos = body.rfind(_footer_marker)
+            body = body[:_pos] + reg_form_html + '\n' + body[_pos:]
+        else:
+            body = body + '\n' + reg_form_html
 
         # ── Survey voice row — rich modal with country picker + scheduling ────────
         # Always injected (not gated on voicebot). Calls /voice-call/request.
@@ -996,7 +1135,7 @@ class WebsiteAgentService:
 
   /* ── API ────────────────────────────────────────────────────────────────── */
   function apiCall(phone, scheduledFor) {{
-    var payload = scheduledFor ? {{phone:phone,scheduled_for:scheduledFor}} : {{phone:phone}};
+    var payload = scheduledFor ? {{phone_number:phone,scheduled_for:scheduledFor}} : {{phone_number:phone}};
     return fetch(API_BASE + '/api/advertisements/' + AD_ID + '/voice-call/request', {{
       method:'POST',
       headers:{{'Content-Type':'application/json'}},
@@ -1219,7 +1358,7 @@ class WebsiteAgentService:
 
   /* ── POST to backend ───────────────────────────────────────────────────── */
   async function requestCall(phone, scheduledFor) {{
-    var body = {{ phone: phone }};
+    var body = {{ phone_number: phone }};
     if (scheduledFor) body.scheduled_for = scheduledFor;
     var resp = await fetch(API_BASE + '/api/advertisements/' + AD_ID + '/voice-call/request', {{
       method: 'POST',
@@ -1301,130 +1440,6 @@ class WebsiteAgentService:
 }})();
 </script>"""
 
-        reg_form_html = f"""
-<section id="reg-section">
-  <div class="reg-card">
-    <h2 class="reg-title">Your Details</h2>
-    <p class="reg-sub">Help the study team get in touch with you.</p>
-    <div id="reg-note" class="reg-note ineligible" style="display:none"></div>
-    <div class="reg-error" id="reg-error"></div>
-    <div class="reg-done" id="reg-done">
-      &#10003;&ensp;Thank you! Your details have been received.<br>
-      A member of the study team will be in touch with you shortly.
-    </div>
-    <div id="reg-form-fields">
-      <div class="reg-field">
-        <label class="reg-label" for="reg-name">Full Name *</label>
-        <input class="reg-input" id="reg-name" type="text" placeholder="e.g. Jane Smith" autocomplete="name" />
-      </div>
-      <div class="reg-row">
-        <div class="reg-field">
-          <label class="reg-label" for="reg-age">Age *</label>
-          <input class="reg-input" id="reg-age" type="number" placeholder="e.g. 34" min="1" max="120" />
-        </div>
-        <div class="reg-field">
-          <label class="reg-label" for="reg-sex">Sex *</label>
-          <select class="reg-select" id="reg-sex">
-            <option value="">Select&hellip;</option>
-            <option value="male">Male</option>
-            <option value="female">Female</option>
-            <option value="other">Other</option>
-            <option value="prefer_not_to_say">Prefer not to say</option>
-          </select>
-        </div>
-      </div>
-      <div class="reg-field">
-        <label class="reg-label" for="reg-phone">Phone Number *</label>
-        <input class="reg-input" id="reg-phone" type="tel" placeholder="e.g. +1 555 123 4567" autocomplete="tel" />
-      </div>
-      <button class="reg-btn" id="reg-submit">Submit Details</button>
-      <p class="reg-privacy">Your information will only be used by the study team to contact you about this trial. It will not be shared with third parties.</p>
-    </div>
-  </div>
-</section>
-<script>
-(function () {{
-  var AD_ID    = '{ad_id}';
-  var API_BASE = window.location.origin;
-
-  var nameEl   = document.getElementById('reg-name');
-  var ageEl    = document.getElementById('reg-age');
-  var sexEl    = document.getElementById('reg-sex');
-  var phoneEl  = document.getElementById('reg-phone');
-  var submitEl = document.getElementById('reg-submit');
-  var errorEl  = document.getElementById('reg-error');
-  var doneEl   = document.getElementById('reg-done');
-  var fieldsEl = document.getElementById('reg-form-fields');
-  var noteEl   = document.getElementById('reg-note');
-
-  /* Note content is set by survey JS before revealing #reg-section */
-
-  function showError(msg) {{
-    if (!errorEl) return;
-    errorEl.textContent = msg;
-    errorEl.style.display = 'block';
-  }}
-  function hideError() {{ if (errorEl) errorEl.style.display = 'none'; }}
-
-  if (!submitEl) return;
-  submitEl.addEventListener('click', async function () {{
-    hideError();
-    var name  = (nameEl  && nameEl.value.trim())  || '';
-    var age   = parseInt((ageEl   && ageEl.value)   || '', 10);
-    var sex   = (sexEl   && sexEl.value)   || '';
-    var phone = (phoneEl && phoneEl.value.trim())  || '';
-
-    if (!name)                     {{ showError('Please enter your full name.');   return; }}
-    if (isNaN(age) || age < 1 || age > 120) {{ showError('Please enter a valid age.');    return; }}
-    if (!sex)                      {{ showError('Please select your sex.');         return; }}
-    if (!phone || phone.length < 5){{ showError('Please enter a valid phone number.'); return; }}
-
-    submitEl.disabled    = true;
-    submitEl.textContent = 'Submitting\u2026';
-
-    /* Get answers + eligibility captured by survey engine */
-    var answers  = window._surveyAnswers  || [];
-    var eligible = window._surveyEligible || false;
-
-    try {{
-      var resp = await fetch(API_BASE + '/api/advertisements/' + AD_ID + '/survey-responses', {{
-        method: 'POST',
-        headers: {{ 'Content-Type': 'application/json' }},
-        body: JSON.stringify({{
-          full_name:   name,
-          age:         age,
-          sex:         sex,
-          phone:       phone,
-          answers:     answers,
-          is_eligible: eligible
-        }})
-      }});
-      if (!resp.ok) {{
-        var err = await resp.json().catch(function () {{ return {{}}; }});
-        throw new Error((err.detail) || ('Submission failed (HTTP ' + resp.status + ')'));
-      }}
-      /* Success */
-      if (fieldsEl) fieldsEl.style.display = 'none';
-      if (doneEl)   doneEl.style.display   = 'block';
-      if (noteEl)   noteEl.style.display   = 'none';
-
-      /* Reveal interaction section after brief delay */
-      setTimeout(function () {{
-        var ia = document.getElementById('interaction-reveal');
-        if (ia) {{
-          ia.style.display = '';
-          ia.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
-        }}
-      }}, 2000);
-    }} catch (e) {{
-      showError(e.message || 'Something went wrong. Please try again.');
-      submitEl.disabled    = false;
-      submitEl.textContent = 'Submit Details';
-    }}
-  }});
-}})();
-</script>"""
-
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1436,7 +1451,6 @@ class WebsiteAgentService:
 </head>
 <body>
 {body}
-{reg_form_html}
 {chat_float_html}
 {survey_js}
 {chat_js}
@@ -1708,7 +1722,7 @@ Start output with <nav>. End with </footer>. No inline styles. No custom classes
 
     <div class="survey-nav">
       <div class="survey-voice-row">
-        <button class="btn-voice-call" id="survey-voice-btn">&#128222; Speak to an Agent</button>
+        <button class="btn-voice-call" id="survey-voice-btn">&#128222; Speak to Us</button>
       </div>
       <div class="survey-nav-right">
         <button class="btn-survey-prev" id="survey-prev">&#8592; Back</button>

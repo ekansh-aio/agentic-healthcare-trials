@@ -3316,8 +3316,13 @@ function CampaignDetailPageInner() {
     genProgress.start("Building landing page…", 120000);
     try {
       const triggered = await adsAPI.generateWebsite(id);
+      const prevUrl = triggered.output_url;
       // Backend returns immediately; poll until the background task commits
       const updated = await pollUntilUpdated(id, triggered.updated_at);
+      // Detect silent failure: task touched updated_at but didn't produce a URL
+      if (!updated.output_url && !prevUrl) {
+        throw new Error("Website generation failed on the server. Check the backend logs for the error.");
+      }
       setAd(updated);
       genProgress.complete();
     } catch (err) {

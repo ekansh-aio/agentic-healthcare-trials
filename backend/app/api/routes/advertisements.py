@@ -21,6 +21,7 @@ import mimetypes
 import shutil
 import tempfile
 import uuid as uuid_mod
+from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -809,6 +810,18 @@ async def _bg_generate_website(ad_id: str, company_id: str) -> None:
             await db.commit()
     except Exception as e:
         logger.error("Background website generation failed for ad %s: %s", ad_id, e, exc_info=True)
+        # Touch updated_at so the frontend poll can detect that the task finished
+        # (even on failure) rather than timing out after 5 minutes.
+        try:
+            from app.db.database import async_session_factory as _sf
+            async with _sf() as db2:
+                r2 = await db2.execute(select(Advertisement).where(Advertisement.id == ad_id))
+                ad2 = r2.scalar_one_or_none()
+                if ad2:
+                    ad2.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await db2.commit()
+        except Exception as touch_err:
+            logger.error("Failed to touch updated_at after website gen failure for ad %s: %s", ad_id, touch_err)
 
 
 # ─── AI Strategy Generation (Curator) ────────────────────────────────────────
