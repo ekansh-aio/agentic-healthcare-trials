@@ -1966,9 +1966,10 @@ async def _bg_rewrite_strategy(
     restore_status: AdStatus,
 ) -> None:
     """
-    Background task: run Curator rewrite, then restore the campaign to its
-    pre-rewrite status (UNDER_REVIEW or STRATEGY_CREATED) so the PM's queue
-    position is preserved. On failure, also restores original status.
+    Background task: rewrite strategy with Curator, then immediately run the
+    Reviewer pre-analysis (same as submit-for-review) so the campaign lands in
+    UNDER_REVIEW without requiring the Study Coordinator to re-submit manually.
+    On failure, restores original status so the campaign is not stuck in OPTIMIZING.
     """
     from app.db.database import async_session_factory
     try:
@@ -1992,13 +1993,11 @@ async def _bg_rewrite_strategy(
                 key=lambda d: d.priority, reverse=True,
             )
 
+            # Step 1: regenerate strategy
             curator = CuratorService(db, company_id)
             strategy = await curator.generate_strategy(ad, all_docs, extra_instructions=instructions)
-
             ad.strategy_json = strategy
             flag_modified(ad, "strategy_json")
-            # Restore to original state — preserves PM's review queue position
-            ad.status = restore_status
 
             preview = instructions[:120] + ("…" if len(instructions) > 120 else "")
             db.add(Review(
@@ -2008,6 +2007,27 @@ async def _bg_rewrite_strategy(
                 status="pending",
                 comments=f"AI Re-Strategy completed: '{preview}'",
             ))
+
+            # Step 2: immediately run Reviewer pre-analysis so the PM does not
+            # need to hand back to the Study Coordinator for re-submission.
+            # This mirrors what _bg_submit_for_review does.
+            try:
+                reviewer_svc = ReviewerService(db, company_id)
+                review_output = await reviewer_svc.pre_review(ad)
+                ad.website_reqs = review_output.get("website_requirements")
+                ad.ad_details   = review_output.get("ad_details")
+                flag_modified(ad, "website_reqs")
+                flag_modified(ad, "ad_details")
+                ad.status = AdStatus.UNDER_REVIEW
+            except Exception as review_err:
+                # Reviewer failed — still save the new strategy and fall back to
+                # STRATEGY_CREATED so the SC can re-submit manually if needed.
+                logger.error(
+                    "Post-rewrite reviewer pre-analysis failed for ad %s: %s",
+                    ad_id, review_err, exc_info=True,
+                )
+                ad.status = AdStatus.STRATEGY_CREATED
+
             await db.commit()
     except Exception as e:
         logger.error("Background rewrite-strategy failed for ad %s: %s", ad_id, e, exc_info=True)
