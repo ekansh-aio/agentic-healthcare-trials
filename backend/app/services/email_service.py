@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def _build_otp_email(to_email: str, user_name: str, code: str) -> MIMEMultipart:
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = "ClinAds Pro — Password Change Verification Code"
+    msg["Subject"] = "ALT Trials — Password Change Verification Code"
     msg["From"]    = settings.SMTP_FROM or settings.SMTP_USER
     msg["To"]      = to_email
 
@@ -29,7 +29,7 @@ def _build_otp_email(to_email: str, user_name: str, code: str) -> MIMEMultipart:
         f"  {code}\n\n"
         f"This code expires in 10 minutes. "
         f"If you didn't request a password change, you can safely ignore this email.\n\n"
-        f"— ClinAds Pro"
+        f"— ALT Trials"
     )
     html = f"""
     <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;
@@ -43,7 +43,7 @@ def _build_otp_email(to_email: str, user_name: str, code: str) -> MIMEMultipart:
         {code}
       </div>
       <p style="margin:20px 0 0;color:#9ca3af;font-size:0.75rem;text-align:center">
-        Expires in 10 minutes &nbsp;·&nbsp; ClinAds Pro
+        Expires in 10 minutes &nbsp;·&nbsp; ALT Trials
       </p>
     </div>
     """

@@ -57,11 +57,8 @@ export default function LoginPage() {
       <div style={{ width: "100%", maxWidth: "28rem" }}>
 
         {/* Brand mark */}
-        <div className="flex items-center justify-center gap-2.5 mb-10">
-          <div className="sidebar__logo-mark w-8 h-8 rounded-lg">
-            <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: "var(--color-sidebar-bg)" }} />
-          </div>
-          <span className="sidebar__app-name text-lg">ClinAds Pro</span>
+        <div className="flex items-center justify-center mb-10">
+          <img src="/alt1_trails_logo.svg" alt="ALT Trials" style={{ height: "56px", width: "auto", display: "block", margin: "0 auto" }} />
         </div>
 
         {/* Login card */}
