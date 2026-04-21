@@ -1958,16 +1958,73 @@ async def minor_edit_strategy(
 
 # ─── Reviewer: AI Re-Strategy ─────────────────────────────────────────────────
 
+async def _bg_rewrite_strategy(ad_id: str, company_id: str, reviewer_id: str, instructions: str) -> None:
+    """Background task: re-run Curator with reviewer instructions, update ad on completion."""
+    from app.db.database import async_session_factory
+    try:
+        async with async_session_factory() as db:
+            result = await db.execute(select(Advertisement).where(Advertisement.id == ad_id))
+            ad = result.scalar_one_or_none()
+            if not ad:
+                return
+
+            company_docs_result = await db.execute(
+                select(CompanyDocument).where(CompanyDocument.company_id == company_id)
+            )
+            protocol_docs_result = await db.execute(
+                select(AdvertisementDocument).where(
+                    AdvertisementDocument.advertisement_id == ad_id,
+                    AdvertisementDocument.company_id == company_id,
+                )
+            )
+            all_docs = sorted(
+                list(company_docs_result.scalars().all()) + list(protocol_docs_result.scalars().all()),
+                key=lambda d: d.priority, reverse=True,
+            )
+
+            curator = CuratorService(db, company_id)
+            strategy = await curator.generate_strategy(ad, all_docs, extra_instructions=instructions)
+
+            ad.strategy_json = strategy
+            flag_modified(ad, "strategy_json")
+            ad.status = AdStatus.STRATEGY_CREATED
+
+            preview = instructions[:120] + ("…" if len(instructions) > 120 else "")
+            audit = Review(
+                advertisement_id=ad_id,
+                reviewer_id=reviewer_id,
+                review_type="system",
+                status="pending",
+                comments=f"AI Re-Strategy triggered by reviewer: '{preview}'",
+            )
+            db.add(audit)
+            await db.commit()
+    except Exception as e:
+        logger.error("Background rewrite-strategy failed for ad %s: %s", ad_id, e, exc_info=True)
+        try:
+            from app.db.database import async_session_factory as _sf
+            async with _sf() as db2:
+                result = await db2.execute(select(Advertisement).where(Advertisement.id == ad_id))
+                ad = result.scalar_one_or_none()
+                if ad and ad.status == AdStatus.GENERATING:
+                    ad.status = AdStatus.STRATEGY_CREATED
+                    await db2.commit()
+        except Exception:
+            pass
+
+
 @router.post("/{ad_id}/rewrite-strategy", response_model=AdvertisementOut)
 async def rewrite_strategy(
     ad_id: str,
     body: RewriteStrategyRequest,
+    background_tasks: BackgroundTasks,
     user: User = Depends(require_roles([UserRole.PROJECT_MANAGER, UserRole.ETHICS_MANAGER])),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Trigger the Curator to rewrite the entire strategy using reviewer instructions.
-    Appends a system audit review recording the action.
+    Kick off async strategy rewrite using reviewer instructions.
+    Returns immediately with status=generating so CloudFront never times out.
+    Frontend polls GET /{ad_id} until updated_at changes.
     """
     result = await db.execute(
         select(Advertisement).where(
@@ -1986,50 +2043,9 @@ async def rewrite_strategy(
             detail=f"Strategy can only be rewritten from STRATEGY_CREATED, UNDER_REVIEW, or ETHICS_REVIEW, not '{ad.status.value}'",
         )
 
-    # Load docs (same as generate-strategy)
-    company_docs_result = await db.execute(
-        select(CompanyDocument).where(CompanyDocument.company_id == user.company_id)
-    )
-    company_docs = company_docs_result.scalars().all()
-
-    protocol_docs_result = await db.execute(
-        select(AdvertisementDocument).where(
-            AdvertisementDocument.advertisement_id == ad_id,
-            AdvertisementDocument.company_id == user.company_id,
-        )
-    )
-    protocol_docs = protocol_docs_result.scalars().all()
-
-    all_docs = sorted(
-        list(company_docs) + list(protocol_docs),
-        key=lambda d: d.priority,
-        reverse=True,
-    )
-
-    curator = CuratorService(db, user.company_id)
-    try:
-        strategy = await curator.generate_strategy(ad, all_docs, extra_instructions=body.instructions)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error("Rewrite strategy failed for ad %s: %s", ad_id, e, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Strategy rewrite failed: {e}")
-
-    ad.strategy_json = strategy
-    flag_modified(ad, "strategy_json")
-    ad.status = AdStatus.STRATEGY_CREATED
-
-    # Audit review
-    preview = body.instructions[:120] + ("…" if len(body.instructions) > 120 else "")
-    audit = Review(
-        advertisement_id=ad_id,
-        reviewer_id=user.id,
-        review_type="system",
-        status="pending",
-        comments=f"AI Re-Strategy triggered by reviewer: '{preview}'",
-    )
-    db.add(audit)
+    ad.status = AdStatus.GENERATING
     await db.flush()
+    background_tasks.add_task(_bg_rewrite_strategy, ad_id, user.company_id, user.id, body.instructions)
     return ad
 
 
@@ -2232,6 +2248,34 @@ async def request_voice_call(
         raise HTTPException(status_code=502, detail=f"ElevenLabs error: {e}")
 
     return {"status": "calling", "to": phone, "detail": result}
+
+
+@router.post("/{ad_id}/sync-voice-transcripts")
+async def sync_voice_transcripts(
+    ad_id: str,
+    user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR, UserRole.PROJECT_MANAGER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Manually pull all completed call transcripts from ElevenLabs for this campaign
+    and store them in the database, linked to participants by phone number.
+    """
+    result = await db.execute(
+        select(Advertisement).where(
+            Advertisement.id == ad_id,
+            Advertisement.company_id == user.company_id,
+        )
+    )
+    ad = result.scalar_one_or_none()
+    if not ad:
+        raise HTTPException(status_code=404, detail="Advertisement not found")
+
+    svc = VoicebotAgentService(db)
+    try:
+        summary = await svc.sync_all_transcripts(ad_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"ElevenLabs sync failed: {e}")
+    return summary
 
 
 @router.get("/{ad_id}/voice-session/token")

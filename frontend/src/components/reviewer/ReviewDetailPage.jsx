@@ -27,7 +27,7 @@ import {
   Layers, TrendingUp, List, Send, Sparkles,
   RefreshCw, CheckCircle2, BarChart2, Zap, MessageCircle,
   FileText, ClipboardList, Eye, Calendar, LayoutDashboard,
-  History, ClipboardCheck, Download, X, Check,
+  History, ClipboardCheck, Download, X, Check, Phone,
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 
@@ -1415,9 +1415,26 @@ function AIReStrategyPanel({ adId, onRewritten }) {
     if (!instructions.trim()) { setError("Instructions are required."); return; }
     if (!confirmed) { setError("Please confirm you want to replace the current strategy."); return; }
     setLoading(true); setError(null); setSuccess(false);
-    reProgress.start("Re-writing strategy…", 25000);
+    // Budget 3 min for the Curator AI call. The backend returns immediately
+    // (status=generating) so CloudFront never times out; we poll until
+    // updated_at advances, matching the generate-strategy pattern.
+    reProgress.start("Re-writing strategy…", 120000);
     try {
-      await adsAPI.rewriteStrategy(adId, { instructions: instructions.trim() });
+      const triggered = await adsAPI.rewriteStrategy(adId, { instructions: instructions.trim() });
+      const beforeAt  = triggered.updated_at;
+      const deadline  = Date.now() + 180_000;
+      let   done      = false;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 4000));
+        try {
+          const latest = await adsAPI.get(adId);
+          if (latest.updated_at !== beforeAt && latest.status !== "generating") {
+            done = true;
+            break;
+          }
+        } catch (_) { /* swallow transient errors */ }
+      }
+      if (!done) throw new Error("Timed out waiting for re-strategy to complete. Please refresh.");
       reProgress.complete();
       setSuccess(true);
       setInstructions("");
@@ -1498,7 +1515,7 @@ function AIReStrategyPanel({ adId, onRewritten }) {
           style={{ display: "inline-flex", alignItems: "center", gap: 8, opacity: (loading || !confirmed) ? 0.6 : 1, cursor: (loading || !confirmed) ? "not-allowed" : "pointer" }}
         >
           {loading ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Sparkles size={14} />}
-          {loading ? "Re-writing strategy… (15–30s)" : "Trigger AI Re-Strategy"}
+          {loading ? "Re-writing strategy… (1–2 min)" : "Trigger AI Re-Strategy"}
         </button>
         <InlineProgress progress={reProgress.progress} />
       </div>
@@ -1661,6 +1678,8 @@ export default function ReviewerCampaignDetail() {
   const [participants,        setParticipants]        = useState([]);
   const [participantsLoading, setParticipantsLoading] = useState(false);
   const [selectedParticipant, setSelectedParticipant] = useState(null);
+  const [syncingTranscripts,  setSyncingTranscripts]  = useState(false);
+  const [syncResult,          setSyncResult]          = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -1691,6 +1710,25 @@ export default function ReviewerCampaignDetail() {
   }, [pageTab, id]);
 
   const handleActionDone = async () => { await load(); };
+
+  const handleSyncTranscripts = async () => {
+    setSyncingTranscripts(true);
+    setSyncResult(null);
+    try {
+      const result = await surveyAPI.syncTranscripts(id);
+      setSyncResult(result);
+      const data = await surveyAPI.list(id);
+      setParticipants(data || []);
+      if (selectedParticipant) {
+        const refreshed = (data || []).find((p) => p.id === selectedParticipant.id);
+        if (refreshed) setSelectedParticipant(refreshed);
+      }
+    } catch (err) {
+      setSyncResult({ error: err.message || "Sync failed" });
+    } finally {
+      setSyncingTranscripts(false);
+    }
+  };
 
   if (loading) return (
     <PageWithSidebar>
@@ -1974,6 +2012,36 @@ export default function ReviewerCampaignDetail() {
                   </div>
                 ))}
               </div>
+              {/* Voice call transcript */}
+              {selectedParticipant.voice_sessions?.length > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                  <p style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>Voice Call Transcript</p>
+                  {selectedParticipant.voice_sessions.map((vs) => (
+                    <div key={vs.id} style={{ border: "1px solid var(--color-card-border)", borderRadius: 10, overflow: "hidden", marginBottom: 12 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", backgroundColor: "var(--color-page-bg)", borderBottom: vs.transcripts?.length > 0 ? "1px solid var(--color-card-border)" : "none" }}>
+                        <Phone size={14} style={{ color: "var(--color-accent)", flexShrink: 0 }} />
+                        <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--color-input-text)" }}>{vs.phone || "Unknown number"}</span>
+                        <span style={{ marginLeft: "auto", fontSize: "0.72rem", fontWeight: 600, padding: "2px 8px", borderRadius: 20, backgroundColor: vs.status === "ended" ? "rgba(34,197,94,0.12)" : vs.status === "failed" ? "rgba(239,68,68,0.1)" : "rgba(245,158,11,0.12)", color: vs.status === "ended" ? "#16a34a" : vs.status === "failed" ? "#dc2626" : "#b45309" }}>{vs.status}</span>
+                        {vs.duration_seconds != null && <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)" }}>{Math.floor(vs.duration_seconds / 60)}m {vs.duration_seconds % 60}s</span>}
+                        <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)" }}>{new Date(vs.started_at).toLocaleString()}</span>
+                      </div>
+                      {vs.transcripts?.length > 0 ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 0, maxHeight: 360, overflowY: "auto", padding: "12px 16px" }}>
+                          {[...vs.transcripts].sort((a, b) => (a.turn_index ?? 0) - (b.turn_index ?? 0)).map((turn, ti) => (
+                            <div key={ti} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "flex-start" }}>
+                              <span style={{ flexShrink: 0, width: 44, fontSize: "0.68rem", fontWeight: 700, textAlign: "right", paddingTop: 3, color: turn.speaker === "agent" ? "var(--color-accent)" : "var(--color-sidebar-text)", textTransform: "uppercase" }}>{turn.speaker === "agent" ? "Agent" : "User"}</span>
+                              <div style={{ flex: 1, padding: "8px 12px", borderRadius: 8, fontSize: "0.83rem", lineHeight: 1.5, backgroundColor: turn.speaker === "agent" ? "rgba(16,185,129,0.07)" : "var(--color-page-bg)", border: "1px solid var(--color-card-border)", color: "var(--color-input-text)" }}>{turn.text}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p style={{ fontSize: "0.8rem", color: "var(--color-sidebar-text)", padding: "12px 16px" }}>No transcript available yet.</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {selectedParticipant.answers?.length > 0 && (
                 <>
                   <p style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>Survey Answers</p>
@@ -1994,6 +2062,19 @@ export default function ReviewerCampaignDetail() {
             </SectionCard>
           ) : (
             <SectionCard title="Participants" subtitle="People who completed the survey and submitted their details">
+              {ad.ad_type?.includes("voicebot") && (
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+                  <button
+                    onClick={handleSyncTranscripts}
+                    disabled={syncingTranscripts}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-card-bg)", cursor: syncingTranscripts ? "not-allowed" : "pointer", fontSize: "0.8rem", fontWeight: 600, color: "var(--color-input-text)", opacity: syncingTranscripts ? 0.6 : 1 }}
+                  >
+                    {syncingTranscripts ? <><Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> Syncing…</> : <><RefreshCw size={13} /> Sync Transcripts</>}
+                  </button>
+                  {syncResult && !syncResult.error && <span style={{ fontSize: "0.78rem", color: "#16a34a" }}>✓ {syncResult.synced} synced, {syncResult.skipped} already up-to-date</span>}
+                  {syncResult?.error && <span style={{ fontSize: "0.78rem", color: "#dc2626" }}>{syncResult.error}</span>}
+                </div>
+              )}
               {participantsLoading ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "32px 0", justifyContent: "center" }}>
                   <Loader2 size={18} style={{ animation: "spin 1s linear infinite", color: "var(--color-accent)" }} />
