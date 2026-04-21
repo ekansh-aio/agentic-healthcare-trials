@@ -2057,18 +2057,13 @@ async def rewrite_strategy(
             detail=f"Strategy can only be rewritten from STRATEGY_CREATED, UNDER_REVIEW, or ETHICS_REVIEW, not '{ad.status.value}'",
         )
 
-    restore_status = ad.status  # remember where to return after rewrite
-
-    ad.status = AdStatus.OPTIMIZING
-    await db.flush()
-
     background_tasks.add_task(
         _bg_rewrite_strategy,
         ad_id,
         user.company_id,
         user.id,
         body.instructions,
-        restore_status,
+        ad.status,
     )
     return ad
 
