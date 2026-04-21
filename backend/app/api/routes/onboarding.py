@@ -14,6 +14,9 @@ File storage note:
 
 import asyncio
 import logging
+import os
+import re
+import secrets
 import traceback
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,9 +32,14 @@ from app.core.security import hash_password, require_roles
 from app.services.storage import file_storage
 from app.services.storage.extractor import extract_text, url_to_disk_path, BACKEND_ROOT
 from app.services.training.trainer import TrainingService
-# Reuse the same filename sanitiser as /documents/upload so behaviour matches
-# across onboarding and My Company uploads.
-from app.api.routes.documents import _safe_filename
+
+
+def _safe_filename(original: str | None) -> str:
+    base = os.path.basename(original or "upload")
+    stem, ext = os.path.splitext(base)
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._-") or "file"
+    ext  = re.sub(r"[^A-Za-z0-9.]+", "", ext).lower()
+    return f"{secrets.token_hex(4)}_{stem}{ext}"
 
 logger = logging.getLogger(__name__)
 

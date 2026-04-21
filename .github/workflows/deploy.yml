@@ -178,18 +178,13 @@ jobs:
           fi
 
       # ── 12. Invalidate CloudFront cache ────────────────────────────────────
-      # Finds the distribution by domain and creates a /* invalidation so
+      # Finds the distribution by domain name and creates a /* invalidation so
       # browsers always get the latest index.html and JS bundles after deploy.
       - name: Invalidate CloudFront cache
         run: |
           DIST_ID=$(aws cloudfront list-distributions \
-            --query "DistributionList.Items[?contains(Aliases.Items, 'clinadspro.com') || DomainName=='d2s8k22yb5c8me.cloudfront.net'].Id" \
+            --query "DistributionList.Items[?DomainName=='d2s8k22yb5c8me.cloudfront.net'].Id" \
             --output text 2>/dev/null || true)
-          if [ -z "$DIST_ID" ]; then
-            DIST_ID=$(aws cloudfront list-distributions \
-              --query "DistributionList.Items[?DomainName=='d2s8k22yb5c8me.cloudfront.net'].Id" \
-              --output text 2>/dev/null || true)
-          fi
           if [ -n "$DIST_ID" ]; then
             aws cloudfront create-invalidation \
               --distribution-id "$DIST_ID" \
@@ -206,4 +201,4 @@ jobs:
           echo "✅ Deploy complete"
           echo "   Backend  → $BACKEND_TASK_FAMILY:$BACKEND_REVISION  (image: $IMAGE_TAG)"
           echo "   Frontend → $FRONTEND_TASK_FAMILY:$FRONTEND_REVISION  (image: $IMAGE_TAG)"
-          echo "   Live URL → https://clinadspro.com"
+          echo "   Live URL → https://d2s8k22yb5c8me.cloudfront.net/"
