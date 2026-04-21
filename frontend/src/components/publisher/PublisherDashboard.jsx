@@ -316,9 +316,9 @@ export default function PublisherDashboard() {
         const existing = p[fk] || {};
         const seeds = {};
 
-        // Seed destination_url from hosted landing page
+        // Seed destination_url from hosted landing page — must be absolute for Meta
         if (!existing.destination_url && ad?.hosted_url) {
-          seeds.destination_url = ad.hosted_url;
+          seeds.destination_url = `${window.location.origin}${ad.hosted_url}`;
         }
 
         // AI-suggested daily budget: use strategy daily budget, or spread total over 30 days

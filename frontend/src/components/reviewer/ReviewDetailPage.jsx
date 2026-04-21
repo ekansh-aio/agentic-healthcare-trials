@@ -1415,26 +1415,43 @@ function AIReStrategyPanel({ adId, onRewritten }) {
     if (!instructions.trim()) { setError("Instructions are required."); return; }
     if (!confirmed) { setError("Please confirm you want to replace the current strategy."); return; }
     setLoading(true); setError(null); setSuccess(false);
-    // Budget 3 min for the Curator AI call. The backend returns immediately
-    // (status=generating) so CloudFront never times out; we poll until
-    // updated_at advances, matching the generate-strategy pattern.
-    reProgress.start("Re-writing strategy…", 120000);
+reProgress.start("Re-writing strategy…", 120000);
+
+try {
+  const triggered = await adsAPI.rewriteStrategy(adId, {
+    instructions: instructions.trim(),
+  });
+
+  const beforeAt = triggered.updated_at;
+  const deadline = Date.now() + 180000;
+  let done = false;
+
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 4000));
+
     try {
-      const triggered = await adsAPI.rewriteStrategy(adId, { instructions: instructions.trim() });
-      const beforeAt  = triggered.updated_at;
-      const deadline  = Date.now() + 180_000;
-      let   done      = false;
-      while (Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 4000));
-        try {
-          const latest = await adsAPI.get(adId);
-          if (latest.updated_at !== beforeAt && latest.status !== "generating") {
-            done = true;
-            break;
-          }
-        } catch (_) { /* swallow transient errors */ }
+      const latest = await adsAPI.get(adId);
+
+      const processing =
+        latest.status === "optimizing" ||
+        latest.status === "generating";
+
+      const changed = latest.updated_at !== beforeAt;
+
+      if (changed && !processing) {
+        done = true;
+        break;
       }
-      if (!done) throw new Error("Timed out waiting for re-strategy to complete. Please refresh.");
+    } catch (_) {
+      // swallow transient polling errors
+    }
+  }
+
+  if (!done) {
+    throw new Error(
+      "Timed out waiting for re-strategy to complete. Please refresh."
+    );
+  }
       reProgress.complete();
       setSuccess(true);
       setInstructions("");

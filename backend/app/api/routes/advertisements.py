@@ -1958,8 +1958,18 @@ async def minor_edit_strategy(
 
 # ─── Reviewer: AI Re-Strategy ─────────────────────────────────────────────────
 
-async def _bg_rewrite_strategy(ad_id: str, company_id: str, reviewer_id: str, instructions: str) -> None:
-    """Background task: re-run Curator with reviewer instructions, update ad on completion."""
+async def _bg_rewrite_strategy(
+    ad_id: str,
+    company_id: str,
+    reviewer_id: str,
+    instructions: str,
+    restore_status: AdStatus,
+) -> None:
+    """
+    Background task: run Curator rewrite, then restore the campaign to its
+    pre-rewrite status (UNDER_REVIEW or STRATEGY_CREATED) so the PM's queue
+    position is preserved. On failure, also restores original status.
+    """
     from app.db.database import async_session_factory
     try:
         async with async_session_factory() as db:
@@ -1987,27 +1997,28 @@ async def _bg_rewrite_strategy(ad_id: str, company_id: str, reviewer_id: str, in
 
             ad.strategy_json = strategy
             flag_modified(ad, "strategy_json")
-            ad.status = AdStatus.STRATEGY_CREATED
+            # Restore to original state — preserves PM's review queue position
+            ad.status = restore_status
 
             preview = instructions[:120] + ("…" if len(instructions) > 120 else "")
-            audit = Review(
+            db.add(Review(
                 advertisement_id=ad_id,
                 reviewer_id=reviewer_id,
                 review_type="system",
                 status="pending",
-                comments=f"AI Re-Strategy triggered by reviewer: '{preview}'",
-            )
-            db.add(audit)
+                comments=f"AI Re-Strategy completed: '{preview}'",
+            ))
             await db.commit()
     except Exception as e:
         logger.error("Background rewrite-strategy failed for ad %s: %s", ad_id, e, exc_info=True)
+        # Restore original status so the campaign isn't stuck in OPTIMIZING
         try:
             from app.db.database import async_session_factory as _sf
             async with _sf() as db2:
                 result = await db2.execute(select(Advertisement).where(Advertisement.id == ad_id))
                 ad = result.scalar_one_or_none()
-                if ad and ad.status == AdStatus.GENERATING:
-                    ad.status = AdStatus.STRATEGY_CREATED
+                if ad and ad.status == AdStatus.OPTIMIZING:
+                    ad.status = restore_status
                     await db2.commit()
         except Exception:
             pass
@@ -2022,9 +2033,8 @@ async def rewrite_strategy(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Kick off async strategy rewrite using reviewer instructions.
-    Returns immediately with status=generating so CloudFront never times out.
-    Frontend polls GET /{ad_id} until updated_at changes.
+    Kick off async strategy rewrite. Returns immediately with status=optimizing.
+    Frontend polls GET /{ad_id} until status returns to its previous value.
     """
     result = await db.execute(
         select(Advertisement).where(
@@ -2043,9 +2053,19 @@ async def rewrite_strategy(
             detail=f"Strategy can only be rewritten from STRATEGY_CREATED, UNDER_REVIEW, or ETHICS_REVIEW, not '{ad.status.value}'",
         )
 
-    ad.status = AdStatus.GENERATING
-    await db.flush()
-    background_tasks.add_task(_bg_rewrite_strategy, ad_id, user.company_id, user.id, body.instructions)
+restore_status = ad.status  # remember where to return after rewrite
+
+ad.status = AdStatus.OPTIMIZING
+await db.flush()
+
+background_tasks.add_task(
+    _bg_rewrite_strategy,
+    ad_id,
+    user.company_id,
+    user.id,
+    body.instructions,
+    restore_status,
+)
     return ad
 
 
