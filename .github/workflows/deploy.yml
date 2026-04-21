@@ -178,13 +178,13 @@ jobs:
           fi
 
       # ── 12. Invalidate CloudFront cache ────────────────────────────────────
-      # Finds the distribution by domain name and creates a /* invalidation so
-      # browsers always get the latest index.html and JS bundles after deploy.
+      # CF_DISTRIBUTION_ID secret must be set in GitHub → Settings → Secrets.
+      # To find it: AWS Console → CloudFront → Distributions → copy the ID
+      # column (format: E1XXXXXXXXXX).  The domain d2s8k22yb5c8me.cloudfront.net
+      # is the domain name, not the ID.
       - name: Invalidate CloudFront cache
         run: |
-          DIST_ID=$(aws cloudfront list-distributions \
-            --query "DistributionList.Items[?DomainName=='d2s8k22yb5c8me.cloudfront.net'].Id" \
-            --output text 2>/dev/null || true)
+          DIST_ID="${{ secrets.CF_DISTRIBUTION_ID }}"
           if [ -n "$DIST_ID" ]; then
             aws cloudfront create-invalidation \
               --distribution-id "$DIST_ID" \
@@ -192,7 +192,7 @@ jobs:
               --region us-east-1
             echo "CloudFront invalidation created for $DIST_ID"
           else
-            echo "⚠️  CloudFront distribution not found — skipping invalidation"
+            echo "⚠️  CF_DISTRIBUTION_ID secret not set — skipping invalidation"
           fi
 
       # ── 13. Summary ────────────────────────────────────────────────────────
