@@ -2454,8 +2454,18 @@ async def approve_optimizer_changes(
                 deployed.append("creatives: no Meta campaign or no output files")
 
         elif field:
-            # Content field change is already staged in strategy_json — nothing more to deploy
-            deployed.append(f"field '{field}' already staged")
+            new_val = sugg_approve.get("new_value")
+            if new_val is not None:
+                # Write the new value back into ad_details so it persists.
+                # ad_details is a mutable JSON column — reassign to trigger dirty tracking.
+                details = dict(ad.ad_details or {})
+                details[field] = new_val
+                ad.ad_details = details
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(ad, "ad_details")
+                deployed.append(f"field '{field}' updated")
+            else:
+                deployed.append(f"field '{field}' — no new_value in suggestion")
 
         review.status = "approved"
 

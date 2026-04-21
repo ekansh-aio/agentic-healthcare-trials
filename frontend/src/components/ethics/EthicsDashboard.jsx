@@ -463,10 +463,10 @@ export default function EthicsDashboard() {
                   <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                     <div style={{
                       width: 34, height: 34, borderRadius: 9, flexShrink: 0,
-                      background: "rgba(245,158,11,0.1)",
+                      background: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.1)",
                       display: "flex", alignItems: "center", justifyContent: "center",
                     }}>
-                      <Sparkles size={15} style={{ color: "#d97706" }} />
+                      <Sparkles size={15} style={{ color: "var(--color-accent)" }} />
                     </div>
                     <div style={{ minWidth: 0 }}>
                       <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700, color: "var(--color-input-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -479,8 +479,9 @@ export default function EthicsDashboard() {
                   </div>
                   <span style={{
                     fontSize: "0.7rem", fontWeight: 700, padding: "3px 10px", borderRadius: 999,
-                    background: "rgba(245,158,11,0.12)", color: "#b45309", flexShrink: 0,
-                    border: "1px solid rgba(245,158,11,0.25)",
+                    background: "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.1)",
+                    color: "var(--color-sidebar-text-active)", flexShrink: 0,
+                    border: "1px solid rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.25)",
                   }}>
                     {changeCount} change{changeCount !== 1 ? "s" : ""}
                   </span>
@@ -494,30 +495,30 @@ export default function EthicsDashboard() {
                     const isCreative = sugg.action === "regenerate_creative";
                     const isWebsite  = sugg.action === "regenerate_website";
 
-                    const TYPE_COLORS = {
-                      CREATIVE: { bg: "rgba(99,102,241,0.08)", border: "rgba(99,102,241,0.22)", text: "#6366f1", dot: "#6366f1" },
-                      WEBSITE:  { bg: "rgba(14,165,233,0.08)", border: "rgba(14,165,233,0.22)", text: "#0369a1", dot: "#0ea5e9" },
-                      FIELD:    { bg: "rgba(245,158,11,0.06)", border: "rgba(245,158,11,0.2)",  text: "#b45309", dot: "#f59e0b" },
-                    };
-                    const typeKey = isCreative ? "CREATIVE" : isWebsite ? "WEBSITE" : "FIELD";
-                    const tc = TYPE_COLORS[typeKey];
                     const typeLabel = isCreative ? "Creative" : isWebsite ? "Website" : (sugg.field || "Change").replace(/_/g, " ");
+                    const accentBorder = "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.2)";
+                    const accentBg     = "rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.04)";
 
                     return (
                       <div key={change.review_id} style={{
-                        borderRadius: 10, border: `1px solid ${tc.border}`,
-                        background: tc.bg, overflow: "hidden",
+                        borderRadius: 10,
+                        border: "1px solid var(--color-card-border)",
+                        background: "var(--color-page-bg)",
+                        overflow: "hidden",
                       }}>
                         {/* Change header row */}
                         <div style={{
                           display: "flex", alignItems: "center", gap: 8,
                           padding: "10px 14px",
-                          borderBottom: isField && sugg.new_value ? `1px solid ${tc.border}` : "none",
+                          borderBottom: isField && sugg.new_value ? "1px solid var(--color-card-border)" : "none",
                         }}>
-                          <div style={{ width: 6, height: 6, borderRadius: "50%", background: tc.dot, flexShrink: 0 }} />
+                          <div style={{
+                            width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                            background: "var(--color-accent)",
+                          }} />
                           <span style={{
                             fontSize: "0.66rem", fontWeight: 800, textTransform: "uppercase",
-                            letterSpacing: "0.04em", color: tc.text, flexShrink: 0,
+                            letterSpacing: "0.04em", color: "var(--color-sidebar-text-active)", flexShrink: 0,
                           }}>
                             {typeLabel}
                           </span>
@@ -535,33 +536,33 @@ export default function EthicsDashboard() {
                             {sugg.old_value && (
                               <div style={{
                                 padding: "10px 14px",
-                                borderRight: "1px solid rgba(239,68,68,0.2)",
+                                borderRight: "1px solid var(--color-card-border)",
                                 background: "rgba(239,68,68,0.04)",
                               }}>
                                 <p style={{
                                   margin: "0 0 5px", fontSize: "0.65rem", fontWeight: 700,
                                   textTransform: "uppercase", letterSpacing: "0.05em",
-                                  color: "#dc2626", display: "flex", alignItems: "center", gap: 4,
+                                  color: "var(--color-muted)", display: "flex", alignItems: "center", gap: 4,
                                 }}>
-                                  <span style={{ fontSize: "0.7rem" }}>−</span> Before
+                                  <span>−</span> Before
                                 </p>
-                                <p style={{ margin: 0, fontSize: "0.82rem", color: "#7f1d1d", lineHeight: 1.55 }}>
+                                <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--color-sidebar-text)", lineHeight: 1.55, textDecoration: "line-through", opacity: 0.7 }}>
                                   {sugg.old_value}
                                 </p>
                               </div>
                             )}
                             <div style={{
                               padding: "10px 14px",
-                              background: "rgba(34,197,94,0.05)",
+                              background: accentBg,
                             }}>
                               <p style={{
                                 margin: "0 0 5px", fontSize: "0.65rem", fontWeight: 700,
                                 textTransform: "uppercase", letterSpacing: "0.05em",
-                                color: "#16a34a", display: "flex", alignItems: "center", gap: 4,
+                                color: "var(--color-sidebar-text-active)", display: "flex", alignItems: "center", gap: 4,
                               }}>
-                                <span style={{ fontSize: "0.7rem" }}>+</span> After
+                                <span>+</span> After
                               </p>
-                              <p style={{ margin: 0, fontSize: "0.82rem", color: "#14532d", lineHeight: 1.55 }}>
+                              <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--color-input-text)", lineHeight: 1.55 }}>
                                 {sugg.new_value}
                               </p>
                             </div>
@@ -571,7 +572,7 @@ export default function EthicsDashboard() {
                         {/* Action note for creative/website changes */}
                         {(isCreative || isWebsite) && (
                           <div style={{ padding: "8px 14px", display: "flex", alignItems: "center", gap: 6 }}>
-                            <AlertCircle size={12} style={{ color: tc.text, flexShrink: 0 }} />
+                            <AlertCircle size={12} style={{ color: "var(--color-muted)", flexShrink: 0 }} />
                             <p style={{ margin: 0, fontSize: "0.76rem", color: "var(--color-muted)" }}>
                               {isCreative
                                 ? "New creative images will be uploaded to Meta on approval."
@@ -588,22 +589,18 @@ export default function EthicsDashboard() {
                 <div style={{
                   padding: "14px 20px",
                   borderTop: "1px solid var(--color-card-border)",
-                  background: "rgba(0,0,0,0.015)",
+                  background: "var(--color-page-bg)",
                   display: "flex", alignItems: "center", gap: 10,
                 }}>
                   <button
                     onClick={() => handleOptApprove(group.ad_id, allIds)}
                     disabled={!!acting}
+                    className="btn--accent"
                     style={{
                       flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
-                      padding: "10px 16px", borderRadius: 9, border: "none", cursor: acting ? "not-allowed" : "pointer",
-                      background: acting ? "rgba(22,163,74,0.5)" : "#16a34a",
-                      color: "#fff", fontSize: "0.83rem", fontWeight: 700,
-                      transition: "background 0.15s",
                       opacity: acting && acting !== "approving" ? 0.45 : 1,
+                      cursor: acting ? "not-allowed" : "pointer",
                     }}
-                    onMouseEnter={(e) => { if (!acting) e.currentTarget.style.background = "#15803d"; }}
-                    onMouseLeave={(e) => { if (!acting) e.currentTarget.style.background = "#16a34a"; }}
                   >
                     {acting === "approving"
                       ? <><Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> Deploying…</>
@@ -612,17 +609,13 @@ export default function EthicsDashboard() {
                   <button
                     onClick={() => handleOptReject(group.ad_id, allIds)}
                     disabled={!!acting}
+                    className="btn--ghost"
                     style={{
                       flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
-                      padding: "10px 16px", borderRadius: 9, cursor: acting ? "not-allowed" : "pointer",
-                      background: "transparent",
-                      border: "1px solid rgba(239,68,68,0.35)",
-                      color: "#dc2626", fontSize: "0.83rem", fontWeight: 600,
-                      transition: "background 0.15s, border-color 0.15s",
                       opacity: acting && acting !== "rejecting" ? 0.45 : 1,
+                      cursor: acting ? "not-allowed" : "pointer",
+                      color: "var(--color-muted)",
                     }}
-                    onMouseEnter={(e) => { if (!acting) { e.currentTarget.style.background = "rgba(239,68,68,0.06)"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.55)"; }}}
-                    onMouseLeave={(e) => { if (!acting) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.35)"; }}}
                   >
                     {acting === "rejecting"
                       ? <><Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> Reverting…</>
