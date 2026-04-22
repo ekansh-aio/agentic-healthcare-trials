@@ -719,7 +719,7 @@
 
       /* 4. Start WebSocket voice session — audio never touches our servers */
       conversation = await Conversation.startSession({
-        signedUrl: data.signed_url,,
+        signedUrl: data.signed_url,
         config: {
           audio: {
             input: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -730,7 +730,7 @@
             mode: 'server',
             sensitivity: 'high'
           }
-        }
+        },
         onConnect: function () {
           setBtn('⏹ End Call', false);
         },
