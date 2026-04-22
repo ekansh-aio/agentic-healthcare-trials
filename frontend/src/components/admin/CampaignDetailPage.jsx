@@ -4320,7 +4320,8 @@ function CampaignDetailPageInner() {
               )}
             </SectionCard>
           ) : (
-            /* ── List view ── */
+            <>
+            {/* ── List view ── */}
             <SectionCard
               title="Participants"
               subtitle="People who completed the survey and submitted their details"
@@ -4507,7 +4508,8 @@ function CampaignDetailPageInner() {
                 </div>
               </SectionCard>
             )}
-          </div>
+            </>
+          )}
         </div>
       )}
 
