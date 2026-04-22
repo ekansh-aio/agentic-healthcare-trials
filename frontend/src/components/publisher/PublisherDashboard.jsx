@@ -651,7 +651,7 @@ function getDeployChecklist(ad) {
       label:    "Voice agent provisioned",
       done:     !!ad.bot_config?.elevenlabs_agent_id,
       detail:   ad.bot_config?.elevenlabs_agent_id
-        ? `Agent ID: ${ad.bot_config.elevenlabs_agent_id}`
+        ? "Voice agent provisioned"
         : "Not yet provisioned",
       note:     null,
       action:   !ad.bot_config?.elevenlabs_agent_id
@@ -1195,7 +1195,7 @@ function VoicebotConfig({ ad }) {
       };
     } catch (err) {
       cleanupCall(); setCallStatus("idle");
-      if (err.message?.includes("No ElevenLabs agent provisioned") || err.message?.includes("No voice agent provisioned")) {
+      if (err.message?.includes("No ElevenLabs agent provisioned") || err.message?.includes("No voice agent provisioned") || err.message?.includes("agent provisioned")) {
         setAgentStatus({ provisioned: false });
         setCallError("Agent is not provisioned — click Provision Agent to set it up.");
       } else {

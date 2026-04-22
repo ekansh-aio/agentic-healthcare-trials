@@ -1963,27 +1963,18 @@ export default function ReviewerCampaignDetail() {
       {/* QUESTIONNAIRE */}
       {pageTab === "questionnaire" && (
         <div>
-          {qualifies ? (
-            <>
-              <div style={{ marginBottom: 20 }}>
-                <h2 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--color-input-text)", margin: 0 }}>
-                  Eligibility Questionnaire
-                </h2>
-                <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)", marginTop: 4 }}>
-                  {ad.questionnaire?.questions?.length
-                    ? `${ad.questionnaire.questions.length} question${ad.questionnaire.questions.length !== 1 ? "s" : ""} · edit wording or regenerate below`
-                    : "No questions yet — generate to get started"
-                  }
-                </p>
-              </div>
-              <QuestionnaireViewer questionnaire={ad.questionnaire} adId={id} onGenerated={handleActionDone} role={role} />
-            </>
-          ) : (
-            <div style={{ textAlign: "center", padding: "48px 0" }}>
-              <ClipboardList size={32} style={{ color: "var(--color-card-border)", margin: "0 auto 12px" }} />
-              <p style={{ color: "var(--color-sidebar-text)", fontSize: "0.9rem" }}>This campaign type does not require a questionnaire.</p>
-            </div>
-          )}
+          <div style={{ marginBottom: 20 }}>
+            <h2 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--color-input-text)", margin: 0 }}>
+              Eligibility Questionnaire
+            </h2>
+            <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)", marginTop: 4 }}>
+              {ad.questionnaire?.questions?.length
+                ? `${ad.questionnaire.questions.length} question${ad.questionnaire.questions.length !== 1 ? "s" : ""} · edit wording or regenerate below`
+                : "No questions yet — generate to get started"
+              }
+            </p>
+          </div>
+          <QuestionnaireViewer questionnaire={ad.questionnaire} adId={id} onGenerated={handleActionDone} role={role} />
         </div>
       )}
 

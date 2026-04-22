@@ -4089,30 +4089,21 @@ function CampaignDetailPageInner() {
       {/* ══ QUESTIONNAIRE tab ═════════════════════════════════════════════════ */}
       {pageTab === "questionnaire" && (
         <div>
-          {qualifies ? (
-            <>
-              <div style={{ marginBottom: 20 }}>
-                <h2 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--color-input-text)", margin: 0 }}>
-                  Eligibility Questionnaire
-                </h2>
-                <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)", marginTop: 4 }}>
-                  {ad.campaign_category ? ad.campaign_category.replace("_", " ") + " campaign" : "Detected from campaign title"} — define the questions participants will answer
-                </p>
-              </div>
-              <QuestionnaireSection
-                adId={id}
-                questionnaire={ad.questionnaire}
-                readOnly={isPublisher}
-                showAI={isStudyCoordinator}
-                onSaved={load}
-              />
-            </>
-          ) : (
-            <div style={{ textAlign: "center", padding: "48px 0" }}>
-              <ClipboardList size={32} style={{ color: "var(--color-card-border)", margin: "0 auto 12px" }} />
-              <p style={{ color: "var(--color-sidebar-text)", fontSize: "0.9rem" }}>This campaign type does not require a questionnaire.</p>
-            </div>
-          )}
+          <div style={{ marginBottom: 20 }}>
+            <h2 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--color-input-text)", margin: 0 }}>
+              Eligibility Questionnaire
+            </h2>
+            <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)", marginTop: 4 }}>
+              {ad.campaign_category ? ad.campaign_category.replace("_", " ") + " campaign" : "Campaign"} — define the questions participants will answer
+            </p>
+          </div>
+          <QuestionnaireSection
+            adId={id}
+            questionnaire={ad.questionnaire}
+            readOnly={isPublisher}
+            showAI={isStudyCoordinator}
+            onSaved={load}
+          />
         </div>
       )}
 
@@ -4539,7 +4530,7 @@ function CampaignDetailPageInner() {
                     ? <InlineProgress progress={genProgress.progress} />
                     : !ad.output_files?.length && (
                         <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>
-                          Generates copy + images for all ad formats · uses AWS Bedrock Titan
+                          Generates copy + images for all ad formats using AI
                         </p>
                       )
                   }
