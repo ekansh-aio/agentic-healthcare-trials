@@ -55,7 +55,7 @@
   "containerDefinitions": [
     {
       "name": "backend",
-      "image": "809411919411.dkr.ecr.us-east-1.amazonaws.com/agentic_healthcare/backend:v10",
+      "image": "809411919411.dkr.ecr.us-east-1.amazonaws.com/agentic_healthcare/backend:v11",
       "portMappings": [{"containerPort": 8000, "protocol": "tcp"}],
       "essential": true,
       "mountPoints": [

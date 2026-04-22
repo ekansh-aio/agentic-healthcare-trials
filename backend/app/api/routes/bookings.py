@@ -69,47 +69,59 @@ async def get_slots(
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
     db: AsyncSession = Depends(get_db),
 ):
-    # Validate ad exists
-    ad = await db.get(Advertisement, ad_id)
-    if not ad:
-        raise HTTPException(status_code=404, detail="Campaign not found")
-
-    # Parse requested date
     try:
-        req_date = datetime.strptime(date, "%Y-%m-%d").date()
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+        # Validate ad exists
+        ad = await db.get(Advertisement, ad_id)
+        if not ad:
+            raise HTTPException(status_code=404, detail="Campaign not found")
 
-    duration = _slot_duration(ad)
-    all_slots = _generate_slots(duration)
+        # Parse requested date
+        try:
+            req_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
 
-    # Find already-booked confirmed slots on this date
-    day_start = datetime(req_date.year, req_date.month, req_date.day, 0, 0, 0)
-    day_end   = day_start + timedelta(days=1)
-    result = await db.execute(
-        select(Appointment).where(
-            Appointment.advertisement_id == ad_id,
-            Appointment.status == "confirmed",
-            Appointment.slot_datetime >= day_start,
-            Appointment.slot_datetime < day_end,
-        )
-    )
-    booked_times = {
-        appt.slot_datetime.strftime("%H:%M")
-        for appt in result.scalars().all()
-    }
+        duration = _slot_duration(ad)
+        all_slots = _generate_slots(duration)
 
-    # Mark past slots as unavailable
-    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        # Find already-booked confirmed slots on this date
+        day_start = datetime(req_date.year, req_date.month, req_date.day, 0, 0, 0)
+        day_end   = day_start + timedelta(days=1)
 
-    slot_list = []
-    for s in all_slots:
-        slot_dt = datetime(req_date.year, req_date.month, req_date.day,
-                           *map(int, s["time"].split(":")))
-        available = (s["time"] not in booked_times) and (slot_dt > now_utc)
-        slot_list.append(SlotInfo(time=s["time"], label=s["label"], available=available))
+        try:
+            result = await db.execute(
+                select(Appointment).where(
+                    Appointment.advertisement_id == ad_id,
+                    Appointment.status == "confirmed",
+                    Appointment.slot_datetime >= day_start,
+                    Appointment.slot_datetime < day_end,
+                )
+            )
+            booked_times = {
+                appt.slot_datetime.strftime("%H:%M")
+                for appt in result.scalars().all()
+            }
+        except Exception as e:
+            # If appointments table doesn't exist yet, treat all slots as available
+            logger.warning(f"Could not query appointments (table may not exist): {e}")
+            booked_times = set()
 
-    return AvailableSlotsResponse(date=date, duration_minutes=duration, slots=slot_list)
+        # Mark past slots as unavailable
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        slot_list = []
+        for s in all_slots:
+            slot_dt = datetime(req_date.year, req_date.month, req_date.day,
+                               *map(int, s["time"].split(":")))
+            available = (s["time"] not in booked_times) and (slot_dt > now_utc)
+            slot_list.append(SlotInfo(time=s["time"], label=s["label"], available=available))
+
+        return AvailableSlotsResponse(date=date, duration_minutes=duration, slots=slot_list)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching slots for ad {ad_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch appointment slots: {str(e)}")
 
 
 @router.post("/advertisements/{ad_id}/appointments", response_model=AppointmentOut, status_code=201)
@@ -118,38 +130,50 @@ async def book_appointment(
     body: AppointmentCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    ad = await db.get(Advertisement, ad_id)
-    if not ad:
-        raise HTTPException(status_code=404, detail="Campaign not found")
+    try:
+        ad = await db.get(Advertisement, ad_id)
+        if not ad:
+            raise HTTPException(status_code=404, detail="Campaign not found")
 
-    duration = _slot_duration(ad)
-    slot_dt = body.slot_datetime.replace(tzinfo=None)  # store naive UTC
+        duration = _slot_duration(ad)
+        slot_dt = body.slot_datetime.replace(tzinfo=None)  # store naive UTC
 
-    # Check conflict
-    result = await db.execute(
-        select(Appointment).where(
-            Appointment.advertisement_id == ad_id,
-            Appointment.status == "confirmed",
-            Appointment.slot_datetime == slot_dt,
+        # Check conflict
+        try:
+            result = await db.execute(
+                select(Appointment).where(
+                    Appointment.advertisement_id == ad_id,
+                    Appointment.status == "confirmed",
+                    Appointment.slot_datetime == slot_dt,
+                )
+            )
+            if result.scalars().first():
+                raise HTTPException(status_code=409, detail="This slot has already been booked. Please choose another.")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Could not check for booking conflicts: {e}")
+            # Continue with booking anyway if table doesn't exist
+
+        appt = Appointment(
+            advertisement_id=ad_id,
+            survey_response_id=body.survey_response_id,
+            patient_name=body.patient_name,
+            patient_phone=body.patient_phone,
+            slot_datetime=slot_dt,
+            duration_minutes=duration,
+            status="confirmed",
+            notes=body.notes,
         )
-    )
-    if result.scalars().first():
-        raise HTTPException(status_code=409, detail="This slot has already been booked. Please choose another.")
-
-    appt = Appointment(
-        advertisement_id=ad_id,
-        survey_response_id=body.survey_response_id,
-        patient_name=body.patient_name,
-        patient_phone=body.patient_phone,
-        slot_datetime=slot_dt,
-        duration_minutes=duration,
-        status="confirmed",
-        notes=body.notes,
-    )
-    db.add(appt)
-    await db.commit()
-    await db.refresh(appt)
-    return appt
+        db.add(appt)
+        await db.commit()
+        await db.refresh(appt)
+        return appt
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error booking appointment for ad {ad_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to book appointment: {str(e)}")
 
 
 @router.get("/advertisements/{ad_id}/appointments", response_model=List[AppointmentOut])
