@@ -205,6 +205,7 @@ function StrategyViewer({ strategy }) {
   const [openSection, setOpenSection] = useState(null);
   const toggle = (key) => setOpenSection((prev) => (prev === key ? null : key));
   if (!strategy) return <p style={{ fontSize: 13, color: "var(--color-sidebar-text)" }}>No strategy generated yet.</p>;
+  if (strategy.parse_error) return <p style={{ fontSize: 13, color: "#ef4444" }}>AI generation failed — ask the Study Coordinator to retry generation.</p>;
   const s = strategy;
   return (
     <div>

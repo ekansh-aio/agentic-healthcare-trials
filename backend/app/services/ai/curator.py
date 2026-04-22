@@ -10,6 +10,7 @@ Calls Claude API to produce strategy JSON.
 
 import json
 import os
+import re
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -159,6 +160,39 @@ Respond ONLY with the JSON object, no additional text.
 
         return "\n\n".join(sections)
 
+    @staticmethod
+    def _extract_json(text: str) -> Dict[str, Any]:
+        """
+        Multi-stage JSON extractor for LLM output.
+        Stage 1: direct parse
+        Stage 2: strip markdown fences then parse
+        Stage 3: grab outermost { ... } block then parse
+        Raises json.JSONDecodeError if all stages fail.
+        """
+        # Stage 1: raw
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # Stage 2: strip markdown fences
+        try:
+            clean = re.sub(r"^```[a-zA-Z]*\s*", "", text.strip())
+            clean = re.sub(r"\s*```\s*$", "", clean).strip()
+            return json.loads(clean)
+        except json.JSONDecodeError:
+            pass
+
+        # Stage 3: extract outermost JSON object
+        try:
+            start = text.index("{")
+            end   = text.rindex("}") + 1
+            return json.loads(text[start:end])
+        except (ValueError, json.JSONDecodeError):
+            pass
+
+        raise json.JSONDecodeError("Could not extract JSON from LLM response", text, 0)
+
     async def _call_claude(self, system_prompt: str, user_message: str) -> Dict[str, Any]:
         """Call Claude Opus 4.6 (direct API or Bedrock) with the skill as system prompt.
         Uses get_curator_model() so strategy generation always runs on Opus 4.6."""
@@ -175,8 +209,7 @@ Respond ONLY with the JSON object, no additional text.
         text = response.content[0].text
 
         try:
-            clean = text.strip().removeprefix("```json").removesuffix("```").strip()
-            return json.loads(clean)
+            return self._extract_json(text)
         except json.JSONDecodeError:
             return {"raw_response": text, "parse_error": True}
 
@@ -243,8 +276,7 @@ Return ONLY a JSON object in this exact format:
         )
         text = response.content[0].text
         try:
-            clean = text.strip().removeprefix("```json").removesuffix("```").strip()
-            return json.loads(clean)
+            return self._extract_json(text)
         except json.JSONDecodeError:
             return {"questions": [], "parse_error": True}
 
@@ -287,8 +319,7 @@ Return ONLY the updated question JSON object (no array, no extra text):
         )
         text = response.content[0].text
         try:
-            clean = text.strip().removeprefix("```json").removesuffix("```").strip()
-            updated = json.loads(clean)
+            updated = self._extract_json(text)
             updated["id"] = question.get("id", updated.get("id", "q1"))
             return updated
         except json.JSONDecodeError:

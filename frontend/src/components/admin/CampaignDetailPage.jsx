@@ -31,7 +31,7 @@ import {
   MessageCircle, Send, ThumbsUp, ThumbsDown, RefreshCw, Sparkles,
   Download, Eye, Trash2, ClipboardList, Plus, X as XIcon, GripVertical,
   LayoutDashboard, ClipboardCheck, History, MapPin, Copy, PenLine,
-  Mic, PhoneCall, PhoneOff, Volume2, Wand2, Phone,
+  Mic, PhoneCall, PhoneOff, Volume2, Wand2, Phone, Pencil,
 } from "lucide-react";
 
 // ─── Campaign categories that require a questionnaire ─────────────────────────
@@ -1283,9 +1283,26 @@ function AdUploadSpecs({ specs }) {
   );
 }
 
-function StrategyViewer({ strategy, ad }) {
+function StrategyViewer({ strategy, ad, onRetry }) {
   const [showRaw, setShowRaw] = useState(false);
   if (!strategy) return null;
+
+  if (strategy.parse_error) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "32px 16px", textAlign: "center" }}>
+        <AlertCircle size={32} style={{ color: "#ef4444", opacity: 0.7 }} />
+        <p style={{ fontSize: "0.9rem", fontWeight: 600, color: "var(--color-text)" }}>AI generation failed</p>
+        <p style={{ fontSize: "0.82rem", color: "var(--color-sidebar-text)", maxWidth: 400 }}>
+          This may be a network issue or a temporary API problem. Your documents are intact — please retry.
+        </p>
+        {onRetry && (
+          <button className="btn--inline-action--ghost" onClick={onRetry} style={{ marginTop: 4 }}>
+            Retry Generation
+          </button>
+        )}
+      </div>
+    );
+  }
 
   const {
     executive_summary, target_audience, messaging, channels,
@@ -3144,6 +3161,9 @@ function CampaignDetailPageInner() {
   const [regenInstr,      setRegenInstr]      = useState("");
   const [regenConfirmed,  setRegenConfirmed]  = useState(false);
   const [regenOpen,       setRegenOpen]       = useState(false);
+  const [titleEditing,    setTitleEditing]    = useState(false);
+  const [titleInput,      setTitleInput]      = useState("");
+  const [titleSaving,     setTitleSaving]     = useState(false);
   const [pageTab,         setPageTab]         = useState("overview");
   const [companyLocations, setCompanyLocations] = useState([]);  // [{ country, cities }]
   const [participants,     setParticipants]     = useState([]);
@@ -3151,6 +3171,21 @@ function CampaignDetailPageInner() {
   const [selectedParticipant, setSelectedParticipant] = useState(null);
   const [syncingTranscripts,  setSyncingTranscripts]  = useState(false);
   const [syncResult,          setSyncResult]          = useState(null);
+
+  const saveTitle = async () => {
+    const trimmed = titleInput.trim();
+    if (!trimmed || trimmed === ad.title) { setTitleEditing(false); return; }
+    setTitleSaving(true);
+    try {
+      const updated = await adsAPI.update(id, { title: trimmed });
+      setAd(updated);
+      setTitleEditing(false);
+    } catch (err) {
+      alert(err.message || "Failed to save title.");
+    } finally {
+      setTitleSaving(false);
+    }
+  };
 
   const genProgress = useGenerateProgress();
 
@@ -3244,10 +3279,15 @@ function CampaignDetailPageInner() {
   const handleGenerateStrategy = async () => {
     setGenLoading(true); setGenError(null);
     try {
-      // Step 1 — strategy
+      // Step 1 — strategy (returns immediately with status=generating; poll until done)
       genProgress.start("Generating strategy…", 25000);
-      const afterStrategy = await adsAPI.generateStrategy(id);
+      const triggered = await adsAPI.generateStrategy(id);
+      setAd(triggered);
+      const afterStrategy = await pollUntilUpdated(id, triggered.updated_at, 120_000);
       setAd(afterStrategy);
+      if (afterStrategy.status === "draft") {
+        throw new Error("AI generation failed. This may be a network issue or a temporary API problem. Please try again.");
+      }
       genProgress.complete();
 
       const adTypes = afterStrategy.ad_type || [];
@@ -3519,9 +3559,36 @@ function CampaignDetailPageInner() {
             <p style={{ fontSize: "0.7rem", fontWeight: 600, letterSpacing: "0.1em", color: "rgba(255,255,255,0.4)", textTransform: "uppercase", marginBottom: 6 }}>
               {role?.replace(/_/g, " ")} · Campaign
             </p>
-            <h1 style={{ fontSize: "1.5rem", fontWeight: 700, color: "#fff", lineHeight: 1.3, margin: 0 }}>
-              {ad.title}
-            </h1>
+            {titleEditing ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input
+                  value={titleInput}
+                  onChange={(e) => setTitleInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveTitle(); if (e.key === "Escape") setTitleEditing(false); }}
+                  autoFocus
+                  style={{ fontSize: "1.5rem", fontWeight: 700, color: "#fff", lineHeight: 1.3, background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 8, padding: "2px 10px", outline: "none", minWidth: 0, flex: 1 }}
+                />
+                <button onClick={saveTitle} disabled={titleSaving} style={{ background: "rgba(34,197,94,0.2)", border: "1px solid rgba(34,197,94,0.4)", borderRadius: 6, cursor: "pointer", padding: "4px 10px", color: "#86efac", fontSize: "0.78rem", fontWeight: 600, flexShrink: 0 }}>
+                  {titleSaving ? "…" : "Save"}
+                </button>
+                <button onClick={() => setTitleEditing(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.4)", padding: 4, flexShrink: 0 }}>
+                  <XIcon size={16} />
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <h1 style={{ fontSize: "1.5rem", fontWeight: 700, color: "#fff", lineHeight: 1.3, margin: 0 }}>
+                  {ad.title}
+                </h1>
+                <button
+                  onClick={() => { setTitleInput(ad.title); setTitleEditing(true); }}
+                  title="Rename campaign"
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.35)", padding: 4, flexShrink: 0, display: "flex", alignItems: "center" }}
+                >
+                  <Pencil size={14} />
+                </button>
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
             <CampaignStatusBadge status={ad.status} />
@@ -3855,7 +3922,7 @@ function CampaignDetailPageInner() {
               subtitle="Generated from company and protocol documents"
             >
               {ad.strategy_json ? (
-                <StrategyViewer strategy={ad.strategy_json} ad={ad} />
+                <StrategyViewer strategy={ad.strategy_json} ad={ad} onRetry={isStudyCoordinator ? handleGenerateStrategy : undefined} />
               ) : (
                 <p style={{ fontSize: "0.85rem", color: "var(--color-sidebar-text)" }}>Strategy is being generated…</p>
               )}

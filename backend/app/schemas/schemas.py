@@ -411,7 +411,6 @@ class BotConfigUpdate(BaseModel):
     additional_params: Optional[Dict[str, Any]] = None
     pause_schedule: Optional[Any] = None
     meta_campaign_id: Optional[str] = None
-    meta_adset_id: Optional[str] = None
 
 
 # ─── Reviewer Action Schemas ──────────────────────────────────────────────────

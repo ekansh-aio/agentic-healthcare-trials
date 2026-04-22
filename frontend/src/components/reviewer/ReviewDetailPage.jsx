@@ -237,6 +237,9 @@ function StrategyViewer({ strategy }) {
   if (!strategy) return (
     <p style={{ fontSize: 13, color: "var(--color-sidebar-text)" }}>No strategy generated yet.</p>
   );
+  if (strategy.parse_error) return (
+    <p style={{ fontSize: 13, color: "#ef4444" }}>AI generation failed — ask the Study Coordinator to retry generation.</p>
+  );
   const s = strategy;
   return (
     <div>
@@ -1121,6 +1124,10 @@ function EditableStrategyViewer({ strategy, adId, onSaved }) {
   const [openSection, setOpenSection]         = useState(null);
   const [expandedContentRow, setExpandedContentRow] = useState(null);
   const toggle = (key) => setOpenSection((prev) => prev === key ? null : key);
+
+  if (strategy?.parse_error) return (
+    <p style={{ fontSize: 13, color: "#ef4444" }}>AI generation failed — ask the Study Coordinator to retry generation.</p>
+  );
 
   // Handles both old string KPIs (field=null) and new structured KPIs (field = "metric"|"target"|"context")
   const updateKpi = (index, fieldOrValue, value) => {

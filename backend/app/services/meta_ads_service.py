@@ -516,13 +516,13 @@ class MetaAdsService:
         addon_type: Optional[str] = None,
         addon_phone: Optional[str] = None,
         existing_campaign_id: Optional[str] = None,
-        existing_adset_id: Optional[str] = None,
     ) -> dict:
         """
         Full pipeline: images → campaign → ad set → creatives → ads.
 
-        If existing_campaign_id is provided, reuses that campaign and its ad set
-        instead of creating new ones (republish flow).
+        If existing_campaign_id is provided, reuses that campaign (preserving analytics
+        history) but always creates a fresh adset — archived adsets cannot contain
+        new active ads on Meta.
 
         All ads start ACTIVE and begin serving immediately.
         Returns campaign_id, adset_id, ad_ids, and a direct link to the Ads Manager.
@@ -556,19 +556,15 @@ class MetaAdsService:
         else:
             logger.info("STEP 1b: No connected Instagram account found — skipping Instagram placement")
 
-        if existing_adset_id:
-            logger.info("STEP 2: Reusing existing adset %s", existing_adset_id)
-            adset_id = existing_adset_id
-        else:
-            logger.info("STEP 2: Creating adset...")
-            adset_id = await self.create_adset(
-                campaign_id=campaign_id,
-                name=f"{campaign_name} – Ad Set",
-                daily_budget_cents=daily_budget_cents,
-                targeting_countries=targeting_countries,
-                page_id=page_id,
-            )
-            logger.info("STEP 2 OK: adset %s", adset_id)
+        logger.info("STEP 2: Creating adset...")
+        adset_id = await self.create_adset(
+            campaign_id=campaign_id,
+            name=f"{campaign_name} – Ad Set",
+            daily_budget_cents=daily_budget_cents,
+            targeting_countries=targeting_countries,
+            page_id=page_id,
+        )
+        logger.info("STEP 2 OK: adset %s", adset_id)
 
         ad_ids = []
         for idx, creative in enumerate(to_publish):
