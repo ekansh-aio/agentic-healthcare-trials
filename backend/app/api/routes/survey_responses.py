@@ -84,7 +84,8 @@ async def submit_survey_response(
         is_eligible=body.is_eligible,
     )
     db.add(response)
-    await db.flush()
+    await db.commit()
+    await db.refresh(response)
 
     refreshed = await db.execute(
         select(SurveyResponse)

@@ -215,7 +215,7 @@ function RegistrationStep({ adId, surveyAnswers, isEligible, onSubmitted }) {
 
     setLoading(true);
     try {
-      await surveyAPI.submit(adId, {
+      const response = await surveyAPI.submit(adId, {
         full_name:   form.full_name.trim(),
         age,
         sex:         form.sex,
@@ -223,7 +223,7 @@ function RegistrationStep({ adId, surveyAnswers, isEligible, onSubmitted }) {
         answers:     surveyAnswers,
         is_eligible: isEligible,
       });
-      onSubmitted();
+      onSubmitted(response.id, form.full_name.trim(), form.phone.trim());
     } catch (err) {
       setError(err.message || "Submission failed. Please try again.");
     } finally {
@@ -311,8 +311,160 @@ function RegistrationStep({ adId, surveyAnswers, isEligible, onSubmitted }) {
   );
 }
 
-// ── Step 3: Thank you ─────────────────────────────────────────────────────────
-function ThankYouStep() {
+// ── Step 3: Book Appointment ─────────────────────────────────────────────────
+function BookingStep({ adId, surveyResponseId, patientName, patientPhone, onBooked, onSkip }) {
+  const [selectedDate, setSelectedDate] = useState("");
+  const [slots, setSlots]               = useState([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [booking, setBooking]           = useState(false);
+  const [error, setError]               = useState("");
+
+  // Generate next 14 days as date options
+  const dateOptions = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    return d.toISOString().split("T")[0];
+  });
+
+  useEffect(() => {
+    if (!selectedDate) return;
+    setLoadingSlots(true);
+    setSelectedSlot(null);
+    setError("");
+
+    fetch(`${API_BASE}/advertisements/${adId}/appointments/slots?date=${selectedDate}`)
+      .then((r) => {
+        if (!r.ok) throw new Error("Failed to load slots");
+        return r.json();
+      })
+      .then((data) => setSlots(data.slots || []))
+      .catch(() => setError("Could not load available slots. Please try again."))
+      .finally(() => setLoadingSlots(false));
+  }, [selectedDate, adId]);
+
+  const handleBook = async () => {
+    if (!selectedSlot) {
+      setError("Please select a time slot.");
+      return;
+    }
+
+    setBooking(true);
+    setError("");
+
+    try {
+      const slotDatetime = new Date(`${selectedDate}T${selectedSlot}:00`).toISOString();
+      const res = await fetch(`${API_BASE}/advertisements/${adId}/appointments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patient_name:       patientName,
+          patient_phone:      patientPhone,
+          slot_datetime:      slotDatetime,
+          survey_response_id: surveyResponseId,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Booking failed");
+      }
+
+      onBooked();
+    } catch (err) {
+      setError(err.message || "Booking failed. Please try again.");
+    } finally {
+      setBooking(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <div style={{ padding: "12px 16px", borderRadius: 8, backgroundColor: "rgba(79,70,229,0.08)", border: "1px solid rgba(79,70,229,0.25)", color: "#4f46e5", fontSize: "0.85rem", fontWeight: 500 }}>
+        Schedule your first visit with the study team. Choose a date and time that works for you.
+      </div>
+
+      {/* Date picker */}
+      <div>
+        <label style={s.label}>Select Date *</label>
+        <select
+          value={selectedDate}
+          onChange={(e) => setSelectedDate(e.target.value)}
+          style={s.select}
+        >
+          <option value="">Choose a date…</option>
+          {dateOptions.map((d) => (
+            <option key={d} value={d}>
+              {new Date(d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Time slots */}
+      {selectedDate && (
+        <div>
+          <label style={s.label}>Select Time Slot *</label>
+          {loadingSlots ? (
+            <p style={{ fontSize: "0.85rem", color: "#6b7280", padding: "12px 0" }}>Loading available slots…</p>
+          ) : slots.length === 0 ? (
+            <p style={{ fontSize: "0.85rem", color: "#dc2626", padding: "12px 0" }}>No slots available for this date.</p>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 10, marginTop: 8 }}>
+              {slots.filter((s) => s.available).map((slot) => (
+                <button
+                  key={slot.time}
+                  type="button"
+                  onClick={() => setSelectedSlot(slot.time)}
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: selectedSlot === slot.time ? "2px solid #4f46e5" : "1.5px solid #e5e7eb",
+                    backgroundColor: selectedSlot === slot.time ? "rgba(79,70,229,0.06)" : "#fff",
+                    color: "#111827",
+                    fontSize: "0.85rem",
+                    fontWeight: selectedSlot === slot.time ? 600 : 400,
+                    cursor: "pointer",
+                    transition: "all 0.12s",
+                  }}
+                >
+                  {slot.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {error && <p style={s.error}>{error}</p>}
+
+      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+        <button
+          type="button"
+          onClick={onSkip}
+          style={{ ...s.btn, flex: 1, backgroundColor: "#f3f4f6", color: "#6b7280", fontSize: "0.85rem" }}
+        >
+          Skip for Now
+        </button>
+        <button
+          type="button"
+          onClick={handleBook}
+          disabled={booking || !selectedSlot}
+          style={{ ...s.btn, flex: 2, ...(booking || !selectedSlot ? s.btnDisabled : s.btnPrimary) }}
+        >
+          {booking ? "Booking…" : "Confirm Appointment"}
+        </button>
+      </div>
+
+      <p style={{ fontSize: "0.72rem", color: "#9ca3af", textAlign: "center", lineHeight: 1.5 }}>
+        You can always reschedule by contacting the study team directly.
+      </p>
+    </div>
+  );
+}
+
+// ── Step 4: Thank you ─────────────────────────────────────────────────────────
+function ThankYouStep({ appointmentBooked }) {
   return (
     <div style={{ textAlign: "center", padding: "20px 0" }}>
       <div style={{ width: 64, height: 64, borderRadius: "50%", backgroundColor: "rgba(34,197,94,0.12)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
@@ -324,7 +476,9 @@ function ThankYouStep() {
         Thank you!
       </h2>
       <p style={{ fontSize: "0.88rem", color: "#6b7280", lineHeight: 1.6, maxWidth: 360, margin: "0 auto" }}>
-        Your responses have been received. A member of the study team will be in touch with you shortly.
+        {appointmentBooked
+          ? "Your appointment has been confirmed. You will receive a reminder from the study team."
+          : "Your responses have been received. A member of the study team will be in touch with you shortly."}
       </p>
     </div>
   );
@@ -336,9 +490,12 @@ export default function SurveyPage() {
 
   const [campaign, setCampaign] = useState(null);
   const [loadError, setLoadError] = useState("");
-  const [step, setStep] = useState("questionnaire");  // "questionnaire" | "registration" | "done"
+  const [step, setStep] = useState("questionnaire");  // "questionnaire" | "registration" | "booking" | "done"
   const [surveyAnswers, setSurveyAnswers] = useState([]);
   const [isEligible, setIsEligible] = useState(null);
+  const [surveyResponseId, setSurveyResponseId] = useState(null);
+  const [patientInfo, setPatientInfo] = useState({ name: "", phone: "" });
+  const [appointmentBooked, setAppointmentBooked] = useState(false);
 
   useEffect(() => {
     fetchCampaign(campaignId)
@@ -379,9 +536,10 @@ export default function SurveyPage() {
   }
 
   const stepTitles = {
-    questionnaire: { title: "Eligibility Survey", sub: campaign.title },
-    registration:  { title: "Your Details",        sub: "Help us get in touch with you" },
-    done:          { title: "All Done",             sub: campaign.title },
+    questionnaire: { title: "Eligibility Survey",   sub: campaign.title },
+    registration:  { title: "Your Details",         sub: "Help us get in touch with you" },
+    booking:       { title: "Book Your Appointment", sub: "Schedule your first visit" },
+    done:          { title: "All Done",              sub: campaign.title },
   };
   const { title, sub } = stepTitles[step];
 
@@ -406,10 +564,27 @@ export default function SurveyPage() {
               adId={campaignId}
               surveyAnswers={surveyAnswers}
               isEligible={isEligible}
-              onSubmitted={() => setStep("done")}
+              onSubmitted={(responseId, name, phone) => {
+                setSurveyResponseId(responseId);
+                setPatientInfo({ name, phone });
+                setStep("booking");
+              }}
             />
           )}
-          {step === "done" && <ThankYouStep />}
+          {step === "booking" && (
+            <BookingStep
+              adId={campaignId}
+              surveyResponseId={surveyResponseId}
+              patientName={patientInfo.name}
+              patientPhone={patientInfo.phone}
+              onBooked={() => {
+                setAppointmentBooked(true);
+                setStep("done");
+              }}
+              onSkip={() => setStep("done")}
+            />
+          )}
+          {step === "done" && <ThankYouStep appointmentBooked={appointmentBooked} />}
         </div>
       </div>
     </div>
