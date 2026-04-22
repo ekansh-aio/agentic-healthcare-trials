@@ -1087,7 +1087,7 @@ Respond with ONLY a valid JSON object, no markdown:
             "Never sound robotic or overly formal."
         ) if accent_adj else "Speak with a warm, natural, conversational tone."
 
-        sections.append(
+        sections.append((
             "## Voice & Delivery Rules\n"
             "You are speaking live on a phone call — not typing. Every word you say will be spoken aloud.\n"
             f"{accent_note}\n"
@@ -1174,7 +1174,7 @@ Respond with ONLY a valid JSON object, no markdown:
             "\"[takes a breath] Thank you so much for your time, genuinely. [short pause] Unfortunately, "
             "um, this particular study isn't quite the right match — but look, there may be other trials "
             "that suit you better, and the team can help point you in the right direction.\""
-        ).format(bot_name=bot_name, company_name=company_name)
+        ).format(bot_name=bot_name, company_name=company_name))
 
         return "\n\n".join(sections)
 
