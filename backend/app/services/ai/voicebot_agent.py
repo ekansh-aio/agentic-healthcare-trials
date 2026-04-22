@@ -835,6 +835,17 @@ Respond with ONLY a valid JSON object, no markdown:
                     "optimize_streaming_latency": 3,
                     "voice_settings":             voice_settings,
                 },
+                "asr": {
+                    "quality": "high",
+                    "user_input_audio_format": "pcm_16000",
+                },
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": 0.5,
+                    "prefix_padding_ms": 300,
+                    "silence_duration_ms": 800,
+                    "interrupt_threshold": 0.6,
+                },
             },
         }
 
