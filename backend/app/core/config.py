@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     ELEVENLABS_PHONE_NUMBER_ID: Optional[str] = None  # Phone number ID for outbound calls
     # TTS model for conversational AI agents — eleven_v3 is the latest model
     # with enhanced support for audio expression tags and natural disfluencies
-    ELEVENLABS_TTS_MODEL: str = "eleven_v3"
+    ELEVENLABS_TTS_MODEL: str = "eleven_v3_conversational"
     ELEVENLABS_WEBHOOK_SECRET: Optional[str] = None   # HMAC secret set on the ElevenLabs agent
 
     # Public-facing base URL — used to register post-call webhook with ElevenLabs.
