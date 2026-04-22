@@ -1642,7 +1642,7 @@ function StrategyViewer({ strategy, ad, onRetry }) {
       {social_content && Object.keys(social_content).length > 0 && (
         <div>
           <SBar label="Social Content & Launch Schedule" />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 14 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {Object.entries(social_content).map(([platform, content]) => (
               <SCard key={platform}>
                 <SCardHead icon={<Send size={13} />} label={platform} />
