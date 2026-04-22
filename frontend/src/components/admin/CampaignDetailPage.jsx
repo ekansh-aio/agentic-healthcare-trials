@@ -1761,15 +1761,16 @@ function InfoRow({ label, value }) {
 
 // ─── Review submission panel ──────────────────────────────────────────────────
 function ReviewPanel({ adId, onSubmitted }) {
-  const [form, setForm]       = useState({ review_type: "strategy", status: "approved", comments: "", suggestions: "" });
+  const [form, setForm]       = useState({ review_type: "strategy", status: "approved", comments: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
 
   const submit = async () => {
-    if (!form.comments.trim()) { setError("Comments are required."); return; }
+    if (!form.comments.trim()) { setError("Comment is required."); return; }
     setLoading(true); setError(null);
     try {
       await adsAPI.createReview(adId, form);
+      setForm({ review_type: "strategy", status: "approved", comments: "" });
       onSubmitted();
     } catch (err) {
       setError(err.message || "Failed to submit review.");
@@ -1778,73 +1779,60 @@ function ReviewPanel({ adId, onSubmitted }) {
     }
   };
 
-  const labelStyle = { fontSize: "0.75rem", fontWeight: 600, color: "var(--color-sidebar-text)", display: "block", marginBottom: "6px" };
-  const selectStyle = {
-    width: "100%", padding: "8px 12px", borderRadius: "8px", fontSize: "0.85rem",
+  const fieldStyle = {
+    padding: "8px 10px", borderRadius: "8px", fontSize: "0.83rem",
     border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-input-bg)",
     color: "var(--color-input-text)", outline: "none",
   };
-  const textStyle = { ...selectStyle, resize: "vertical", minHeight: "80px", fontFamily: "inherit" };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-        <div>
-          <label style={labelStyle}>Review Type</label>
-          <select style={selectStyle} value={form.review_type} onChange={(e) => setForm((p) => ({ ...p, review_type: e.target.value }))}>
-            <option value="strategy">Strategy Review</option>
-            <option value="ethics">Ethics Review</option>
-            <option value="performance">Performance Review</option>
-          </select>
-        </div>
-        <div>
-          <label style={labelStyle}>Decision</label>
-          <select style={selectStyle} value={form.status} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}>
-            <option value="approved">Approve</option>
-            <option value="revision">Request Revision</option>
-            <option value="rejected">Reject</option>
-          </select>
-        </div>
-      </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <select
+          value={form.review_type}
+          onChange={(e) => setForm((p) => ({ ...p, review_type: e.target.value }))}
+          style={{ ...fieldStyle, flexShrink: 0 }}
+        >
+          <option value="strategy">Strategy</option>
+          <option value="ethics">Ethics</option>
+          <option value="performance">Performance</option>
+        </select>
 
-      <div>
-        <label style={labelStyle}>Comments *</label>
-        <textarea
-          style={textStyle}
-          placeholder="Provide your review comments..."
+        <select
+          value={form.status}
+          onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
+          style={{ ...fieldStyle, flexShrink: 0 }}
+        >
+          <option value="approved">Approve</option>
+          <option value="revision">Request Revision</option>
+          <option value="rejected">Reject</option>
+        </select>
+
+        <input
+          type="text"
+          placeholder="Add a comment…"
           value={form.comments}
           onChange={(e) => setForm((p) => ({ ...p, comments: e.target.value }))}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          style={{ ...fieldStyle, flex: 1, minWidth: 180 }}
         />
-      </div>
 
-      <div>
-        <label style={labelStyle}>Suggestions (optional)</label>
-        <textarea
-          style={{ ...textStyle, minHeight: "60px" }}
-          placeholder="Any specific suggestions for improvement..."
-          value={form.suggestions}
-          onChange={(e) => setForm((p) => ({ ...p, suggestions: e.target.value }))}
-        />
-      </div>
-
-      {error && (
-        <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 14px", borderRadius: "8px", backgroundColor: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)" }}>
-          <AlertCircle size={14} style={{ color: "#ef4444", flexShrink: 0 }} />
-          <p style={{ fontSize: "0.82rem", color: "#ef4444" }}>{error}</p>
-        </div>
-      )}
-
-      <div style={{ display: "flex", gap: "10px" }}>
         <button
           onClick={submit}
           disabled={loading}
           className="btn--accent"
-          style={{ display: "inline-flex", alignItems: "center", gap: "8px", opacity: loading ? 0.7 : 1 }}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0, opacity: loading ? 0.7 : 1 }}
         >
-          {loading ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={14} />}
-          Submit Review
+          {loading ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={13} />}
+          Submit
         </button>
       </div>
+
+      {error && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.78rem", color: "#ef4444" }}>
+          <AlertCircle size={13} style={{ flexShrink: 0 }} /> {error}
+        </div>
+      )}
     </div>
   );
 }
@@ -1884,41 +1872,30 @@ function ReviewCard({ review }) {
 
   return (
     <div style={{
-      padding: "14px 16px", borderRadius: "10px",
+      display: "flex", alignItems: "baseline", gap: 10,
+      padding: "10px 14px", borderRadius: 8,
       border: "1px solid var(--color-card-border)",
       backgroundColor: "var(--color-card-bg)",
     }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{
-            fontSize: "0.7rem", fontWeight: 600, padding: "2px 8px",
-            borderRadius: "999px", textTransform: "capitalize",
-            backgroundColor: statusColor + "22", color: statusColor,
-            border: `1px solid ${statusColor}44`,
-          }}>
-            {review.status}
-          </span>
-          <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", textTransform: "capitalize" }}>
-            {review.review_type} review
-          </span>
-        </div>
-        {review.created_at && (
-          <span style={{ fontSize: "0.7rem", color: "var(--color-sidebar-text)" }}>
-            {new Date(review.created_at).toLocaleDateString()}
-          </span>
-        )}
-      </div>
+      <span style={{
+        fontSize: "0.7rem", fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+        flexShrink: 0, textTransform: "capitalize",
+        backgroundColor: statusColor + "22", color: statusColor, border: `1px solid ${statusColor}44`,
+      }}>
+        {review.status}
+      </span>
+      <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", flexShrink: 0, textTransform: "capitalize" }}>
+        {review.review_type}
+      </span>
       {review.comments && (
-        <p style={{ fontSize: "0.82rem", color: "var(--color-input-text)", lineHeight: 1.6 }}>
+        <span style={{ fontSize: "0.82rem", color: "var(--color-input-text)", flex: 1, lineHeight: 1.5 }}>
           {review.comments}
-        </p>
+        </span>
       )}
-      {review.suggestions && (
-        <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)", marginTop: "6px", fontStyle: "italic" }}>
-          Suggestions: {typeof review.suggestions === "object"
-            ? JSON.stringify(review.suggestions, null, 2)
-            : review.suggestions}
-        </p>
+      {review.created_at && (
+        <span style={{ fontSize: "0.68rem", color: "var(--color-sidebar-text)", flexShrink: 0, marginLeft: "auto" }}>
+          {new Date(review.created_at).toLocaleDateString()}
+        </span>
       )}
     </div>
   );
@@ -2832,7 +2809,6 @@ const PAGE_TABS = [
   { key: "participants",  label: "Participants",  icon: Users,           alwaysShow: true  },
   { key: "review",        label: "Review",        icon: ClipboardCheck,  alwaysShow: true  },
   { key: "history",       label: "History",       icon: History,         alwaysShow: true  },
-  { key: "voicebot",      label: "Voicebot",      icon: Bot,             alwaysShow: false },
   { key: "publish",       label: "Publish",       icon: Zap,             alwaysShow: true  },
 ];
 
@@ -3171,6 +3147,12 @@ function CampaignDetailPageInner() {
   const [selectedParticipant, setSelectedParticipant] = useState(null);
   const [syncingTranscripts,  setSyncingTranscripts]  = useState(false);
   const [syncResult,          setSyncResult]          = useState(null);
+  // Voicebot conversation history (loaded in participants tab for voicebot campaigns)
+  const [convHistory,         setConvHistory]         = useState([]);
+  const [convHistoryLoading,  setConvHistoryLoading]  = useState(false);
+  const [selectedConvHistory, setSelectedConvHistory] = useState(null);
+  const [convTranscript,      setConvTranscript]      = useState(null);
+  const [convTransLoading,    setConvTransLoading]    = useState(false);
 
   const saveTitle = async () => {
     const trimmed = titleInput.trim();
@@ -3253,7 +3235,24 @@ function CampaignDetailPageInner() {
       .then((data) => setParticipants(data || []))
       .catch(() => setParticipants([]))
       .finally(() => setParticipantsLoading(false));
-  }, [pageTab, id]);
+    // Load voicebot conversation history alongside participants
+    if (ad?.ad_type?.includes("voicebot")) {
+      setConvHistoryLoading(true);
+      adsAPI.listVoiceConversations(id)
+        .then((r) => setConvHistory(r.conversations || []))
+        .catch(() => setConvHistory([]))
+        .finally(() => setConvHistoryLoading(false));
+    }
+  }, [pageTab, id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSelectConvHistory = async (conv) => {
+    if (selectedConvHistory?.conversation_id === conv.conversation_id) {
+      setSelectedConvHistory(null); return;
+    }
+    setSelectedConvHistory(conv); setConvTranscript(null); setConvTransLoading(true);
+    try { setConvTranscript(await adsAPI.getVoiceTranscript(conv.conversation_id)); } catch {}
+    setConvTransLoading(false);
+  };
 
   const handleSyncTranscripts = async () => {
     setSyncingTranscripts(true);
@@ -3749,6 +3748,41 @@ function CampaignDetailPageInner() {
             </div>
           </SectionCard>
 
+          {/* Voicebot Info — read-only, voicebot campaigns only */}
+          {ad.ad_type?.includes("voicebot") && (() => {
+            const cfg = ad.bot_config || {};
+            const isProvisioned = !!cfg.elevenlabs_agent_id;
+            const voiceName = VOICE_CATALOGUE.find(v => v.id === cfg.voice_id)?.name || cfg.voice_id || "—";
+            const convStyleLabel = cfg.conversation_style
+              ? cfg.conversation_style.charAt(0).toUpperCase() + cfg.conversation_style.slice(1)
+              : "—";
+            return (
+              <SectionCard title="Voice Agent" subtitle="Voicebot configuration for this campaign">
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16 }}>
+                  {[
+                    { label: "Agent Status",        value: isProvisioned ? "Provisioned" : "Not provisioned", accent: isProvisioned },
+                    { label: "Agent Name",           value: cfg.bot_name || "—" },
+                    { label: "Voice",                value: voiceName },
+                    { label: "Conversation Style",   value: convStyleLabel },
+                    { label: "Language",             value: cfg.language || "en" },
+                    { label: "Phone Number",         value: cfg.voice_phone_number || "—" },
+                  ].map(({ label, value, accent }) => (
+                    <div key={label} style={{ padding: "12px 16px", borderRadius: 10, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)" }}>
+                      <p style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</p>
+                      <p style={{ fontSize: "0.88rem", fontWeight: 600, color: accent ? "#22c55e" : "var(--color-input-text)" }}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+                {cfg.first_message && (
+                  <div style={{ marginTop: 14, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)" }}>
+                    <p style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Opening Message</p>
+                    <p style={{ fontSize: "0.85rem", color: "var(--color-input-text)", fontStyle: "italic" }}>&ldquo;{cfg.first_message}&rdquo;</p>
+                  </div>
+                )}
+              </SectionCard>
+            );
+          })()}
+
           {/* Trial Locations — study_coordinator only */}
           {role === "study_coordinator" && (
             <TrialLocationsCard
@@ -4084,10 +4118,7 @@ function CampaignDetailPageInner() {
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
 
           {canReview && (
-            <SectionCard
-              title="Submit Your Review"
-              subtitle="Add your human review — approve, request revisions, or flag ethical concerns"
-            >
+            <SectionCard title="Submit Review">
               <ReviewPanel adId={id} onSubmitted={handleReviewSubmitted} />
             </SectionCard>
           )}
@@ -4383,19 +4414,101 @@ function CampaignDetailPageInner() {
                 </div>
               )}
             </SectionCard>
-          )}
-        </div>
-      )}
 
-      {/* ══ VOICEBOT tab ══════════════════════════════════════════════════════ */}
-      {pageTab === "voicebot" && ad.ad_type?.includes("voicebot") && (
-        <VoicebotPanel
-          ad={ad}
-          adId={id}
-          isPublisher={isPublisher}
-          isStudyCoordinator={isStudyCoordinator}
-          onConfigSaved={load}
-        />
+            {/* Conversation History — voicebot campaigns only */}
+            {ad.ad_type?.includes("voicebot") && (
+              <SectionCard title="Conversation History" subtitle="Past voice sessions from the voicebot">
+                {convHistoryLoading ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--color-sidebar-text)", fontSize: "0.82rem" }}>
+                    <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Loading…
+                  </div>
+                ) : convHistory.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "32px 0" }}>
+                    <PhoneCall size={28} style={{ color: "var(--color-card-border)", margin: "0 auto 10px" }} />
+                    <p style={{ color: "var(--color-sidebar-text)", fontSize: "0.85rem" }}>No conversations yet.</p>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {convHistory.map(c => (
+                      <div
+                        key={c.conversation_id}
+                        onClick={() => handleSelectConvHistory(c)}
+                        style={{
+                          padding: "12px 14px", borderRadius: 8, cursor: "pointer",
+                          border: `1px solid ${selectedConvHistory?.conversation_id === c.conversation_id ? "var(--color-accent)" : "var(--color-card-border)"}`,
+                          backgroundColor: "var(--color-card-bg)", transition: "border-color 0.15s",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <p style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--color-input-text)", fontFamily: "ui-monospace, monospace" }}>
+                            {c.conversation_id?.slice(0, 16)}…
+                          </p>
+                          <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", textTransform: "capitalize" }}>{c.status}</span>
+                        </div>
+                        {c.start_time && (
+                          <p style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", marginTop: 2 }}>
+                            {new Date(c.start_time * 1000).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Transcript viewer */}
+                {selectedConvHistory && (
+                  <div style={{ marginTop: 16, padding: "14px 16px", borderRadius: 10, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <p style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--color-input-text)" }}>Transcript</p>
+                      <button onClick={() => setSelectedConvHistory(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-sidebar-text)", padding: 4 }}>
+                        <XIcon size={14} />
+                      </button>
+                    </div>
+                    {convTransLoading ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--color-sidebar-text)", fontSize: "0.78rem" }}>
+                        <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Loading transcript…
+                      </div>
+                    ) : convTranscript ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto" }}>
+                        {(convTranscript.transcript || []).map((turn, i) => (
+                          <div key={i} style={{ display: "flex", gap: 10 }}>
+                            <span style={{
+                              fontSize: "0.7rem", fontWeight: 700, minWidth: 40, flexShrink: 0, marginTop: 2,
+                              color: turn.role === "agent" ? "var(--color-accent)" : "var(--color-sidebar-text)",
+                            }}>
+                              {turn.role === "agent" ? "Agent" : "User"}
+                            </span>
+                            <p style={{ fontSize: "0.78rem", color: "var(--color-input-text)", lineHeight: 1.55, margin: 0 }}>
+                              {turn.message}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>No transcript data.</p>
+                    )}
+                  </div>
+                )}
+
+                <div style={{ marginTop: 12 }}>
+                  <button
+                    onClick={() => {
+                      setConvHistoryLoading(true);
+                      adsAPI.listVoiceConversations(id)
+                        .then((r) => setConvHistory(r.conversations || []))
+                        .catch(() => {})
+                        .finally(() => setConvHistoryLoading(false));
+                    }}
+                    className="btn--ghost"
+                    style={{ fontSize: "0.78rem", display: "inline-flex", alignItems: "center", gap: 6 }}
+                  >
+                    <RefreshCw size={12} /> Refresh
+                  </button>
+                </div>
+              </SectionCard>
+            )}
+          </div>
+        </div>
       )}
 
       {/* ══ PUBLISH tab ═══════════════════════════════════════════════════════ */}
