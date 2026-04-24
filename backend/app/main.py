@@ -11,10 +11,11 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
 from app.db.database import init_db
-from app.api.routes import auth, onboarding, users, advertisements, documents, analytics, brand_kit, company
+from app.api.routes import auth, onboarding, users, documents, analytics, brand_kit, company
 from app.api.routes import chat, survey_responses
 from app.api.routes import platform_connections
 from app.api.routes import bookings
+from app.api.routes.advertisements import routers as _ad_routers
 from app.core.config import settings
 from app.services.meta_scheduler import run_pause_scheduler
 
@@ -103,7 +104,8 @@ app.include_router(auth.router,           prefix="/api")
 app.include_router(onboarding.router,     prefix="/api")
 app.include_router(users.router,          prefix="/api")
 app.include_router(documents.router,      prefix="/api")
-app.include_router(advertisements.router, prefix="/api")
+for _r in _ad_routers:
+    app.include_router(_r, prefix="/api")
 app.include_router(analytics.router,      prefix="/api")
 app.include_router(brand_kit.router,      prefix="/api")
 app.include_router(company.router,        prefix="/api")
