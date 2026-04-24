@@ -38,6 +38,7 @@ class VoiceSessionOut(BaseModel):
     ended_at: Optional[datetime] = None
     duration_seconds: Optional[int] = None
     transcripts: List[CallTranscriptOut] = []
+    call_analysis: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
