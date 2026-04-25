@@ -1180,7 +1180,8 @@ class WebsiteAgentService:
         '<div class="cta-phase" id="cta-ph3" style="text-align:center;padding:38px 24px">' +
           '<div class="cta-ring cta-ring-green">&#9989;</div>' +
           '<p style="font-size:1.08rem;font-weight:800;color:#111;margin:0 0 8px">Calling you now!</p>' +
-          '<p style="font-size:.85rem;color:#64748b;line-height:1.6;margin:0 0 22px">Your phone will ring in seconds. Pick up to speak with our agent.</p>' +
+          '<p style="font-size:.85rem;color:#64748b;line-height:1.6;margin:0 0 6px">Your phone will ring in a few seconds. Pick up to speak with our agent.</p>' +
+          '<p id="cta-ph3-hint" style="font-size:.75rem;color:#94a3b8;line-height:1.5;margin:0 0 22px;display:none">Didn’t get a call? The number you entered was <strong id="cta-ph3-num"></strong>. Check it’s correct and try again.</p>' +
           '<button class="cta-btn-outline" id="cta-ok1" style="max-width:180px;margin:0 auto">Done</button>' +
         '</div>' +
         /* ── Phase 4: success schedule ── */
@@ -1218,6 +1219,9 @@ class WebsiteAgentService:
   var ok1      = document.getElementById('cta-ok1');
   var ok2      = document.getElementById('cta-ok2');
   var confMsg  = document.getElementById('cta-conf');
+  var ph3Hint  = document.getElementById('cta-ph3-hint');
+  var ph3Num   = document.getElementById('cta-ph3-num');
+  var _callHintTimer = null;
 
   /* ── Phase helpers ──────────────────────────────────────────────────────── */
   var PH = ['cta-ph1','cta-ph2','cta-ph3','cta-ph4'];
@@ -1238,6 +1242,7 @@ class WebsiteAgentService:
     overlay.classList.remove('cta-open');
     document.body.style.overflow = '';
     closeDd();
+    if (_callHintTimer) {{ clearTimeout(_callHintTimer); _callHintTimer = null; }}
   }}
   xBtn.addEventListener('click', closeModal);
   ok1.addEventListener('click', closeModal);
@@ -1339,12 +1344,19 @@ class WebsiteAgentService:
   /* ── Call Now ───────────────────────────────────────────────────────────── */
   nowBtn.addEventListener('click', function() {{
     if (!validPhone()) {{ showSt(s1,'Please enter a valid phone number.','error'); phoneInp.focus(); return; }}
+    var dialledNumber = fullNum();
     nowBtn.disabled = true;
     nowBtn.innerHTML = '<span class="cta-spin"></span>&ensp;Connecting\u2026';
     schedBtn.disabled = true;
     showSt(s1,'Reaching our agent \u2014 your phone will ring shortly\u2026','info');
-    apiCall(fullNum()).then(function() {{
+    apiCall(dialledNumber).then(function() {{
+      if (ph3Hint) ph3Hint.style.display = 'none';
+      if (ph3Num)  ph3Num.textContent = dialledNumber;
       showPh('cta-ph3');
+      if (_callHintTimer) clearTimeout(_callHintTimer);
+      _callHintTimer = setTimeout(function() {{
+        if (ph3Hint) ph3Hint.style.display = 'block';
+      }}, 30000);
     }}).catch(function(e) {{
       showSt(s1,'&#9888; ' + e.message,'error');
       reset1();

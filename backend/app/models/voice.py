@@ -18,6 +18,7 @@ class VoiceSession(Base):
     caller_metadata            = Column(JSON, nullable=True)
     phone                      = Column(String(32), nullable=True)
     survey_response_id         = Column(String, ForeignKey("survey_responses.id"), nullable=True)
+    call_analysis              = Column(JSON, nullable=True)
 
     advertisement   = relationship("Advertisement", back_populates="voice_sessions")
     transcripts     = relationship("CallTranscript", back_populates="session", cascade="all, delete-orphan")
@@ -50,8 +51,9 @@ class ChatSession(Base):
     id          = Column(String, primary_key=True, default=_uuid)
     campaign_id = Column(String, ForeignKey("advertisements.id"), nullable=False)
     session_id  = Column(String, nullable=False)
-    messages    = Column(JSON, default=list)
-    created_at  = Column(DateTime, default=_now)
-    updated_at  = Column(DateTime, default=_now, onupdate=_now)
+    messages      = Column(JSON, default=list)
+    chat_analysis = Column(JSON, nullable=True)
+    created_at    = Column(DateTime, default=_now)
+    updated_at    = Column(DateTime, default=_now, onupdate=_now)
 
     advertisement = relationship("Advertisement", back_populates="chat_sessions")

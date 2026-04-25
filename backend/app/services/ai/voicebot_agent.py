@@ -269,16 +269,32 @@ class VoicebotAgentService:
                 },
                 timeout=30.0,
             )
+            logger.info(
+                "ElevenLabs outbound-call response status=%s body=%s",
+                resp.status_code, resp.text[:500],
+            )
             if not resp.is_success:
                 raise ValueError(f"ElevenLabs outbound call failed ({resp.status_code}): {resp.text}")
             result = resp.json()
 
-        # Persist a VoiceSession so the post-call webhook can attach the transcript.
+        # Validate the response actually confirms a call was initiated.
         conversation_id = (
             result.get("conversation_id")
             or result.get("callSid")
             or result.get("call_sid")
         )
+        if not conversation_id:
+            logger.error(
+                "ElevenLabs outbound-call returned 200 but no conversation_id. "
+                "Full response: %s", result
+            )
+            raise ValueError(
+                "Call request was accepted but ElevenLabs did not return a conversation ID. "
+                "Ensure your ElevenLabs account has a Twilio phone number configured under "
+                "Conversational AI → Phone Numbers."
+            )
+
+        # Persist a VoiceSession so the post-call webhook can attach the transcript.
         session = VoiceSession(
             advertisement_id=advertisement_id,
             elevenlabs_conversation_id=conversation_id,
