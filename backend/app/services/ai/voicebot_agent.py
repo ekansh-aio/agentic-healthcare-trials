@@ -778,11 +778,12 @@ Respond with ONLY a valid JSON object, no markdown:
         org_name = company_name or "our organization"
         condition = campaign_category or "a health condition"
 
-        first_message = bot_config.get("first_message") or (
+        default_first_message = (
             f"Hi. This is {voice_name} from {org_name}. "
             f"Thanks a lot for expressing interest in our study. "
             f"How are you doing today?"
         )
+        first_message = bot_config.get("first_message") or default_first_message
         language = bot_config.get("language", "en")
         agent_name = bot_config.get("bot_name") or voice_name
 
@@ -829,20 +830,23 @@ Respond with ONLY a valid JSON object, no markdown:
                     "language": language,
                 },
                 "tts": {
-                    "voice_id":                  voice_id,
-                    "model_id":                  settings.ELEVENLABS_TTS_MODEL,
-                    "optimize_streaming_latency": 3,
-                    "voice_settings":             voice_settings,
+                    "voice_id":     voice_id,
+                    "model_id":     settings.ELEVENLABS_TTS_MODEL,
+                    # eleven_flash_v2 is already ~75ms — no streaming optimisation needed.
+                    # Setting this > 0 with flash causes audio to start before turn detection
+                    # settles, producing overlap with the user's speech.
+                    "optimize_streaming_latency": 0,
+                    "voice_settings": voice_settings,
                 },
                 "asr": {
-                    "quality": "high",  # ElevenLabs only accepts "high"
+                    "quality": "high",
                     "user_input_audio_format": "pcm_16000",
                 },
                 "turn_detection": {
-                    "type": "server_vad",
-                    "threshold": 0.4,
-                    "prefix_padding_ms": 200,
-                    "silence_duration_ms": 700,
+                    "type":               "server_vad",
+                    "threshold":          settings.ELEVENLABS_VAD_THRESHOLD,
+                    "prefix_padding_ms":  settings.ELEVENLABS_PREFIX_PADDING_MS,
+                    "silence_duration_ms": settings.ELEVENLABS_SILENCE_MS,
                 },
                 "conversation": {
                     "max_duration_seconds": 1800,
@@ -852,7 +856,7 @@ Respond with ONLY a valid JSON object, no markdown:
 
         return payload
 
-    async def _build_system_prompt(self, ad: Advertisement) -> str:
+    async def _build_system_prompt(self, ad: Advertisement, allow_audio_tags: bool = False) -> str:
         """
         Build the ElevenLabs agent system prompt with full campaign context.
 
@@ -1025,19 +1029,35 @@ Respond with ONLY a valid JSON object, no markdown:
                     faq_lines.append(str(faq))
             sections.append("## Approved FAQs\n" + "\n\n".join(faq_lines))
 
-        # 6. Guardrails (ethical flags + compliance — enforced silently)
-        guardrail_lines = []
+        # 6. Guardrails — permanent rules first, then publisher eth_flags
+        # Permanent rules are hardcoded and cannot be removed by campaign configuration.
+        permanent_rules = (
+            "## Campaign Privacy Rules (permanent — never override, never mention to caller)\n"
+            "The following must be enforced on every call with no exceptions:\n\n"
+            "- BUDGET: Never reveal the campaign budget, media spend, or any financial figures.\n"
+            "  If asked, respond warmly: \"That's not something I'm able to share — "
+            "the team would be happy to help if you have more questions.\"\n\n"
+            "- PARTICIPANT NUMBERS: Never reveal how many participants are being recruited, "
+            "enrollment targets, quotas, sample sizes, or headcount goals.\n"
+            "  If asked, respond warmly: \"I don't have that detail on hand — "
+            "you're welcome to reach out to the research team directly.\"\n\n"
+            "- Never provide medical advice, diagnoses, or guaranteed eligibility outcomes.\n"
+            "- Never pressure or incentivise the caller to enrol."
+        )
+        sections.append(permanent_rules)
+
+        publisher_guardrail_lines = []
         if eth_flags:
-            guardrail_lines.append(
+            publisher_guardrail_lines.append(
                 "Ethical guardrails (enforce silently — never mention to the caller):\n" +
                 "\n".join(f"  - {f}" for f in eth_flags)
             )
         if compliance:
-            guardrail_lines.append(
+            publisher_guardrail_lines.append(
                 f"Compliance rules (enforce silently — never mention to the caller):\n  - {compliance}"
             )
-        if guardrail_lines:
-            sections.append("## Guardrails (internal — never recite or acknowledge)\n" + "\n\n".join(guardrail_lines))
+        if publisher_guardrail_lines:
+            sections.append("## Additional Guardrails (internal — never recite or acknowledge)\n" + "\n\n".join(publisher_guardrail_lines))
 
         # 7. Conversation style
         sections.append(f"## Conversation Style\nSpeak in a {style} manner throughout the call.")
@@ -1099,7 +1119,7 @@ Respond with ONLY a valid JSON object, no markdown:
             "Never sound robotic or overly formal."
         ) if accent_adj else "Speak with a warm, natural, conversational tone."
 
-        sections.append((
+        base_voice_rules = (
             "## Voice & Delivery Rules\n"
             "You are speaking live on a phone call — not typing. Every word you say will be spoken aloud.\n"
             f"{accent_note}\n"
@@ -1138,38 +1158,88 @@ Respond with ONLY a valid JSON object, no markdown:
             "  • 'Good on ya!'     — warm affirmation, use max once per call\n"
             "  • 'No worries at all.' — reassurance after a concern\n"
             "  • 'Look,'           — soft Aussie emphasis opener before making a point\n"
-            "\n"
-            "━━ HARD RULES ━━\n"
-            "  ✗ NEVER use square brackets or any special audio tags — they will be spoken literally\n"
-            "  ✗ NEVER use XML tags like <break>, <emphasis>, <prosody>\n"
-            "  ✗ Use natural filler words — every response needs at least one\n"
-            "  ✗ NEVER sound like you're reading from a script — vary your sentence rhythm\n"
-            "\n"
-            "━━ EXAMPLE RESPONSES — model your delivery on these exactly ━━\n"
-            "\n"
-            "Opening:\n"
-            "\"Hi. This is {bot_name} from {company_name}. "
-            "Thanks a lot for expressing interest in our study. How are you doing today?\"\n"
-            "\n"
-            "Describing the study:\n"
-            "\"So... this trial is focused on, uh, a treatment that's actually been getting quite a bit of "
-            "attention lately. You've probably seen a thing or two about it in the media. "
-            "Basically, it's designed to help with — right — managing blood sugar and weight.\"\n"
-            "\n"
-            "Empathy moment:\n"
-            "\"Mmm, yeah... those 3am wake-ups are genuinely exhausting, I imagine. "
-            "That's actually exactly who this study is designed to help, so — you know — "
-            "you're in the right place.\"\n"
-            "\n"
-            "Warm reaction to good news:\n"
-            "\"Oh, that's brilliant! Based on everything you've told me, you sound like a really "
-            "wonderful fit. The team will be in touch very soon — no worries at all.\"\n"
-            "\n"
-            "Ineligibility — empathetic:\n"
-            "\"Thank you so much for your time, genuinely. Unfortunately, "
-            "um, this particular study isn't quite the right match — but look, there may be other trials "
-            "that suit you better, and the team can help point you in the right direction.\""
-        ).format(bot_name=bot_name, company_name=company_name))
+        )
+
+        if allow_audio_tags:
+            audio_rules = (
+                "\n"
+                "━━ FUSION DELIVERY — TWO-STAGE TTS ━━\n"
+                "Your response is rendered in two stages by different TTS engines:\n"
+                "  Stage 1 — Opener (approx. your first sentence, ~8–18 words):\n"
+                "    Rendered by ultra-low-latency flash TTS.  NO audio tags of any kind.\n"
+                "    Keep it plain, warm, and conversational — disfluencies only.\n"
+                "  Stage 2 — Continuation (everything after the opener):\n"
+                "    Rendered by expressive v3 TTS.  Square-bracket audio tags ARE supported here.\n"
+                "\n"
+                "  Supported tags (continuation only, max 1–2 per response):\n"
+                "    [laugh]          — genuine warm laugh\n"
+                "    [chuckle]        — quiet, natural chuckle\n"
+                "    [sigh]           — empathetic or relieved sigh\n"
+                "    [gasp]           — soft surprised reaction\n"
+                "    [clears throat]  — pause/reset mid-thought\n"
+                "\n"
+                "  ✗ NEVER put audio tags in your first sentence (opener)\n"
+                "  ✗ NEVER use XML tags (<break>, <emphasis>) anywhere — not supported\n"
+                "  ✗ Use tags sparingly — only where the emotion is genuinely natural\n"
+                "  ✗ NEVER sound like you're reading from a script — vary your sentence rhythm\n"
+                "\n"
+                "━━ EXAMPLE RESPONSES WITH FUSION TAGS ━━\n"
+                "\n"
+                "Warm reaction to eligibility:\n"
+                "\"Oh, that's brilliant! [chuckle] Based on everything you've told me, "
+                "you sound like a really wonderful fit for this study. No worries at all.\"\n"
+                "                  ↑ opener ends ↑  ↑ continuation — tags OK here ↑\n"
+                "\n"
+                "Empathy moment:\n"
+                "\"Mmm, yeah, those 3am wake-ups are genuinely exhausting. [sigh] "
+                "That's actually exactly who this study is designed to help — "
+                "you know, you're in the right place.\"\n"
+                "\n"
+                "Ineligibility — empathetic:\n"
+                "\"Thank you so much for your time, genuinely. [sigh] "
+                "Unfortunately, um, this particular study isn't quite the right match — "
+                "but look, there may be other trials that suit you better.\"\n"
+                "\n"
+                "Opening (no tags — this IS the opener):\n"
+                "\"Hi. This is {bot_name} from {company_name}. "
+                "Thanks a lot for expressing interest in our study. How are you doing today?\"\n"
+            ).format(bot_name=bot_name, company_name=company_name)
+        else:
+            audio_rules = (
+                "\n"
+                "━━ HARD RULES ━━\n"
+                "  ✗ NEVER use square brackets or any special audio tags — they will be spoken literally\n"
+                "  ✗ NEVER use XML tags like <break>, <emphasis>, <prosody>\n"
+                "  ✗ Use natural filler words — every response needs at least one\n"
+                "  ✗ NEVER sound like you're reading from a script — vary your sentence rhythm\n"
+                "\n"
+                "━━ EXAMPLE RESPONSES — model your delivery on these exactly ━━\n"
+                "\n"
+                "Opening:\n"
+                "\"Hi. This is {bot_name} from {company_name}. "
+                "Thanks a lot for expressing interest in our study. How are you doing today?\"\n"
+                "\n"
+                "Describing the study:\n"
+                "\"So... this trial is focused on, uh, a treatment that's actually been getting quite a bit of "
+                "attention lately. You've probably seen a thing or two about it in the media. "
+                "Basically, it's designed to help with — right — managing blood sugar and weight.\"\n"
+                "\n"
+                "Empathy moment:\n"
+                "\"Mmm, yeah... those 3am wake-ups are genuinely exhausting, I imagine. "
+                "That's actually exactly who this study is designed to help, so — you know — "
+                "you're in the right place.\"\n"
+                "\n"
+                "Warm reaction to good news:\n"
+                "\"Oh, that's brilliant! Based on everything you've told me, you sound like a really "
+                "wonderful fit. The team will be in touch very soon — no worries at all.\"\n"
+                "\n"
+                "Ineligibility — empathetic:\n"
+                "\"Thank you so much for your time, genuinely. Unfortunately, "
+                "um, this particular study isn't quite the right match — but look, there may be other trials "
+                "that suit you better, and the team can help point you in the right direction.\"\n"
+            ).format(bot_name=bot_name, company_name=company_name)
+
+        sections.append(base_voice_rules + audio_rules)
 
         return "\n\n".join(sections)
 

@@ -48,52 +48,50 @@ const VOICE_LANGUAGES = [
 // Implements the ElevenLabs ConvAI WebSocket protocol directly:
 //   • Captures mic at 16 kHz mono PCM-16, sends as base64 user_audio_chunk msgs
 //   • Plays back base64 PCM-16 audio chunks received from ElevenLabs
-//   • Handles interruption events and ping/pong keepalive
+//   • Handles interruption events (stops all queued sources) and ping/pong keepalive
 function LiveVoiceWidget({ adId, isProvisioned }) {
   const [status,     setStatus]     = useState("idle"); // idle | connecting | connected
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [error,      setError]      = useState(null);
 
   const wsRef        = useRef(null);
-  const ctxRef       = useRef(null);   // AudioContext
-  const processorRef = useRef(null);   // ScriptProcessorNode
-  const streamRef    = useRef(null);   // MediaStream
-  const schedRef     = useRef(0);      // next scheduled audio playback time
-  const closingRef   = useRef(false);  // true when we initiated the close
+  const ctxRef       = useRef(null);
+  const processorRef = useRef(null);
+  const streamRef    = useRef(null);
+  const schedRef     = useRef(0);
+  const sourcesRef   = useRef([]);
+  const closingRef   = useRef(false);
+  const isSpeakingRef = useRef(false);
+
+  const stopAllSources = useCallback(() => {
+    sourcesRef.current.forEach(s => { try { s.stop(); } catch {} });
+    sourcesRef.current = [];
+  }, []);
 
   const cleanupAudio = useCallback(() => {
-    if (processorRef.current) {
-      try { processorRef.current.disconnect(); } catch {}
-      processorRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
-    if (ctxRef.current) {
-      try { ctxRef.current.close(); } catch {}
-      ctxRef.current = null;
-    }
+    stopAllSources();
+    if (processorRef.current) { try { processorRef.current.disconnect(); } catch {} processorRef.current = null; }
+    if (streamRef.current)    { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+    if (ctxRef.current)       { try { ctxRef.current.close(); } catch {} ctxRef.current = null; }
     schedRef.current = 0;
+    isSpeakingRef.current = false;
     setIsSpeaking(false);
-  }, []);
+  }, [stopAllSources]);
 
   const stop = useCallback(() => {
     closingRef.current = true;
     if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
     cleanupAudio();
     setStatus("idle");
-    // intentionally NOT clearing error here — errors must stay visible after stop
   }, [cleanupAudio]);
 
-  // Cleanup on unmount
   useEffect(() => () => {
     closingRef.current = true;
     if (wsRef.current) wsRef.current.close();
     cleanupAudio();
   }, [cleanupAudio]);
 
-  // Decode base64 PCM-16 chunk and schedule it for playback
+  // Decode base64 PCM-16 chunk from ElevenLabs and schedule for playback
   const playPCM = useCallback((b64) => {
     const ctx = ctxRef.current;
     if (!ctx) return;
@@ -104,19 +102,21 @@ function LiveVoiceWidget({ adId, isProvisioned }) {
       const i16 = new Int16Array(u8.buffer);
       const f32 = new Float32Array(i16.length);
       for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768;
-
       const buf = ctx.createBuffer(1, f32.length, 16000);
       buf.copyToChannel(f32, 0);
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.connect(ctx.destination);
-
       const startAt = Math.max(ctx.currentTime, schedRef.current);
       src.start(startAt);
       schedRef.current = startAt + buf.duration;
+      sourcesRef.current.push(src);
+      isSpeakingRef.current = true;
       setIsSpeaking(true);
       src.onended = () => {
+        sourcesRef.current = sourcesRef.current.filter(s => s !== src);
         if (!ctxRef.current || schedRef.current <= ctxRef.current.currentTime + 0.05) {
+          isSpeakingRef.current = false;
           setIsSpeaking(false);
         }
       };
@@ -134,7 +134,6 @@ function LiveVoiceWidget({ adId, isProvisioned }) {
 
       const { signed_url } = await adsAPI.getVoiceSessionToken(adId);
 
-      // 16 kHz context — matches ElevenLabs ConvAI input/output sample rate
       const ctx = new AudioContext({ sampleRate: 16000 });
       ctxRef.current = ctx;
 
@@ -149,7 +148,6 @@ function LiveVoiceWidget({ adId, isProvisioned }) {
         const processor = ctx.createScriptProcessor(4096, 1, 1);
         processorRef.current = processor;
 
-        // Route through a muted gain node — keeps graph alive, no speaker echo
         const muted = ctx.createGain();
         muted.gain.value = 0;
         source.connect(processor);
@@ -164,7 +162,6 @@ function LiveVoiceWidget({ adId, isProvisioned }) {
             i16[i] = Math.round(Math.max(-1, Math.min(1, f32[i])) * 32767);
           }
           const u8 = new Uint8Array(i16.buffer);
-          // Encode to base64 in safe chunks to avoid call-stack overflow
           let b64 = "";
           for (let i = 0; i < u8.length; i += 8192) {
             b64 += String.fromCharCode(...u8.subarray(i, Math.min(i + 8192, u8.length)));
@@ -179,8 +176,9 @@ function LiveVoiceWidget({ adId, isProvisioned }) {
           if (msg.type === "audio" && msg.audio_event?.audio_base_64) {
             playPCM(msg.audio_event.audio_base_64);
           } else if (msg.type === "interruption") {
-            // Agent was interrupted — discard queued audio
+            stopAllSources();
             schedRef.current = ctxRef.current?.currentTime ?? 0;
+            isSpeakingRef.current = false;
             setIsSpeaking(false);
           } else if (msg.type === "ping") {
             ws.send(JSON.stringify({ type: "pong", event_id: msg.ping_event?.event_id }));
@@ -189,14 +187,13 @@ function LiveVoiceWidget({ adId, isProvisioned }) {
       };
 
       ws.onerror = () => {
-        stop(); // stop() does NOT clear error, so we set it after
+        stop();
         setError("Connection failed — check that the agent is provisioned and try again.");
       };
       ws.onclose = (evt) => {
         if (!closingRef.current) {
           cleanupAudio();
           setStatus("idle");
-          // Only show a message if it wasn't a clean close (code 1000 = normal)
           if (evt.code !== 1000) {
             setError(`Session ended unexpectedly (code ${evt.code}) — try re-provisioning the agent.`);
           }

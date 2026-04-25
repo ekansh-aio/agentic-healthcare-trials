@@ -660,6 +660,9 @@ export const adsAPI = {
     request(`/advertisements/${adId}`, { method: "DELETE" }),
 
   // ── Voice Agent (ElevenLabs) ──────────────────────────────────────────────
+  getAustralianVoices: () =>
+    request(`/advertisements/voice-profiles/australian`),
+
   getVoiceRecommendation: (adId) =>
     request(`/advertisements/${adId}/voice-recommendation`),
 

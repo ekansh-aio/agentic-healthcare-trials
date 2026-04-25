@@ -15,6 +15,7 @@ from app.api.routes import auth, onboarding, users, documents, analytics, brand_
 from app.api.routes import chat, survey_responses
 from app.api.routes import platform_connections
 from app.api.routes import bookings
+from app.api.routes import hybrid_voice_session
 from app.api.routes.advertisements import routers as _ad_routers
 from app.core.config import settings
 from app.services.meta_scheduler import run_pause_scheduler
@@ -113,6 +114,7 @@ app.include_router(chat.router,             prefix="/api")
 app.include_router(bookings.router,         prefix="/api")
 app.include_router(survey_responses.router, prefix="/api")
 app.include_router(platform_connections.router,  prefix="/api")
+app.include_router(hybrid_voice_session.router,  prefix="/api", tags=["Hybrid Voice"])
 
 
 @app.get("/api/health")

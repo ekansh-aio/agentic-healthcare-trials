@@ -3,12 +3,15 @@ Voice agent routes: provision, status, outbound calls, transcripts, conversation
 """
 
 import logging
+from typing import Any, Dict, List
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.security import require_roles
 from app.db.database import get_db
 from app.models.models import Advertisement, User, UserRole
@@ -155,6 +158,57 @@ async def get_voice_session_token(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"ElevenLabs error: {e}")
     return {"signed_url": signed_url}
+
+
+@router.get("/voice-profiles/australian")
+async def list_australian_voices(
+    user: User = Depends(require_roles([UserRole.PUBLISHER])),
+) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Return all Australian-accent voices available in the ElevenLabs account.
+    Used by the publisher panel voice picker.
+
+    Each entry includes:
+      voice_id, name, gender, age, description, use_case, preview_url, labels
+    """
+    headers = {"xi-api-key": settings.ELEVENLABS_API_KEY or ""}
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                "https://api.elevenlabs.io/v1/voices",
+                headers=headers,
+                params={"show_legacy": "false"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail=f"ElevenLabs error: {exc.response.text}")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not fetch voices: {exc}")
+
+    all_voices: List[Dict[str, Any]] = data.get("voices", [])
+
+    australian = [
+        {
+            "voice_id":    v.get("voice_id", ""),
+            "name":        v.get("name", ""),
+            "preview_url": v.get("preview_url", ""),
+            "gender":      v.get("labels", {}).get("gender", ""),
+            "age":         v.get("labels", {}).get("age", ""),
+            "description": v.get("labels", {}).get("description", ""),
+            "use_case":    v.get("labels", {}).get("use_case", ""),
+            "accent":      v.get("labels", {}).get("accent", ""),
+            "labels":      v.get("labels", {}),
+        }
+        for v in all_voices
+        if "australian" in str(v.get("labels", {}).get("accent", "")).lower()
+    ]
+
+    # Sort: females first (warmer for healthcare), then alphabetically
+    australian.sort(key=lambda v: (0 if v["gender"].lower() == "female" else 1, v["name"]))
+
+    return {"voices": australian, "total": len(australian)}
 
 
 @router.get("/{ad_id}/voice-conversations")

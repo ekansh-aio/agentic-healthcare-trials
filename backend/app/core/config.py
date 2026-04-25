@@ -76,10 +76,32 @@ class Settings(BaseSettings):
     ELEVENLABS_API_KEY: Optional[str] = None
     ELEVENLABS_VOICE_ID: str = "EXAVITQu4vr4xnSDxMaL"  # Default: Rachel
     ELEVENLABS_PHONE_NUMBER_ID: Optional[str] = None  # Phone number ID for outbound calls
-    # TTS model for conversational AI agents — eleven_multilingual_v2 for clean speech
-    # without expressive text processing (no bracket audio tags)
-    ELEVENLABS_TTS_MODEL: str = "eleven_multilingual_v2"
+    # TTS model for ElevenLabs ConvAI agents — flash for <100ms latency + natural disfluencies
+    # eleven_flash_v2_5 is rejected by ConvAI for English agents; eleven_flash_v2 is required
+    ELEVENLABS_TTS_MODEL: str = "eleven_flash_v2"
     ELEVENLABS_WEBHOOK_SECRET: Optional[str] = None   # HMAC secret set on the ElevenLabs agent
+
+    # ── Fusion TTS models (dual-model hybrid voice pipeline) ─────────────────
+    # Flash model: ultra-low latency (~75ms TTFB) — used for the opener phrase.
+    # No expressive audio tag support; audio tags are stripped before synthesis.
+    ELEVENLABS_FLASH_MODEL: str = "eleven_flash_v2"
+    # Expressive model: richer emotional delivery — used for the continuation.
+    # Supports <laugh>, <sigh>, <break> and other audio tags.
+    ELEVENLABS_EXPRESSIVE_MODEL: str = "eleven_v3"
+    # Word count range for the flash opener before handing off to expressive model
+    FUSION_OPENER_MIN_WORDS: int = 8
+    FUSION_OPENER_MAX_WORDS: int = 18
+
+    # Fusion WebSocket voice pipeline settings
+    ELEVENLABS_STREAMING_LATENCY: int = 5
+    ELEVENLABS_VAD_THRESHOLD: float = 0.35
+    ELEVENLABS_SILENCE_MS: int = 550
+    ELEVENLABS_PREFIX_PADDING_MS: int = 150
+    ELEVENLABS_INTERRUPTION_THRESHOLD: float = 0.3
+    # Server-side VAD for hybrid pipeline: RMS energy threshold (0–32767 scale)
+    FUSION_VAD_RMS_THRESHOLD: int = 400
+    # Silence duration (ms) after which end-of-speech is triggered
+    FUSION_VAD_SILENCE_MS: int = 700
 
     # Public-facing base URL — used to register post-call webhook with ElevenLabs.
     # Example: https://api.yourdomain.com  (no trailing slash)

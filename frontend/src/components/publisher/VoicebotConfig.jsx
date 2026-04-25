@@ -1,30 +1,43 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { adsAPI } from "../../services/api";
+import { useAuth } from "../../contexts/AuthContext";
 import { hasType } from "./publisherUtils";
 import {
   Mic, PhoneCall, PhoneOff, Volume2, Radio, Zap,
   Sparkles, CheckCircle2, AlertCircle, MessageSquare, X,
 } from "lucide-react";
 
-// ─── Australian ElevenLabs voice profiles ─────────────────────────────────────
-// Matches AUSTRALIAN_VOICES in voicebot_agent.py
-export const ELEVEN_VOICES = [
-  { id: "XrExE9yKIg1WjnnlVkGX", label: "Matilda — Warm, friendly (F) · Australian" },
-  { id: "IKne3meq5aSn9XLyUdCD", label: "Charlie — Casual, approachable (M) · Australian" },
-  { id: "FGY2WhTYpPnrIDTdsKH5", label: "Laura — Upbeat, energetic (F) · Australian" },
-  { id: "iP95p4xoKVk53GoZ742B", label: "Chris — Professional, measured (M) · Australian" },
-  { id: "pFZP5JQG7iQjIQuC4Bku", label: "Aimee — Friendly, natural (F) · Australian" },
-];
-
 export default function VoicebotConfig({ ad }) {
   const existing = ad.bot_config || {};
+  const { companyName } = useAuth();
 
   const [form, setForm] = useState({
     bot_name:      existing.bot_name      || "Assistant",
-    voice_id:      existing.voice_id      || "XrExE9yKIg1WjnnlVkGX",  // default: Matilda (Australian)
-    first_message: existing.first_message || "[takes a breath] Hi, this is Matilda with [Organization]. [short pause] We're enrolling volunteers for a clinical trial focused on [condition]. [short pause] Participation is voluntary, and, um, I can explain what's involved if you're interested.",
+    voice_id:      existing.voice_id      || "XrExE9yKIg1WjnnlVkGX",
+    first_message: existing.first_message || "",   // seeded after voices load so voice name resolves
     // conversation_style, language, compliance_notes are set by AI recommendation — not exposed to the user
   });
+
+  // Australian voices fetched from ElevenLabs via the backend
+  const [voices, setVoices] = useState([]);
+  const [voicesLoading, setVoicesLoading] = useState(true);
+
+  useEffect(() => {
+    adsAPI.getAustralianVoices(ad.id)
+      .then((data) => setVoices(data.voices || []))
+      .catch(() => setVoices([]))
+      .finally(() => setVoicesLoading(false));
+  }, [ad.id]);
+
+  const selectedVoiceName = voices.find((v) => v.voice_id === form.voice_id)?.name || form.bot_name || "Assistant";
+  const defaultFirstMessage = `Hi. This is ${selectedVoiceName} from ${companyName || "your organization"}. Thanks a lot for expressing interest in our study. How are you doing today?`;
+
+  // Seed first_message once voices have loaded (so voice name resolves correctly)
+  useEffect(() => {
+    if (!voicesLoading && !form.first_message) {
+      setForm((p) => ({ ...p, first_message: defaultFirstMessage }));
+    }
+  }, [voicesLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [saving,         setSaving]         = useState(false);
   const [provisioning,   setProvisioning]   = useState(false);
@@ -65,15 +78,24 @@ export default function VoicebotConfig({ ad }) {
   const processorRef = useRef(null);
   const streamRef    = useRef(null);
   const schedRef     = useRef(0);
+  const sourcesRef   = useRef([]);
   const closingRef   = useRef(false);
+  const isSpeakingRef = useRef(false);  // ref mirror of isSpeaking for use inside closures
+
+  const stopAllSources = useCallback(() => {
+    sourcesRef.current.forEach(s => { try { s.stop(); } catch {} });
+    sourcesRef.current = [];
+  }, []);
 
   const cleanupCall = useCallback(() => {
+    stopAllSources();
     if (processorRef.current) { try { processorRef.current.disconnect(); } catch {} processorRef.current = null; }
     if (streamRef.current)    { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
     if (ctxRef.current)       { try { ctxRef.current.close(); } catch {} ctxRef.current = null; }
     schedRef.current = 0;
+    isSpeakingRef.current = false;
     setIsSpeaking(false);
-  }, []);
+  }, [stopAllSources]);
 
   const stopCall = useCallback(() => {
     closingRef.current = true;
@@ -88,6 +110,7 @@ export default function VoicebotConfig({ ad }) {
     cleanupCall();
   }, [cleanupCall]);
 
+  // Decode base64 PCM-16 chunk from ElevenLabs and schedule for playback
   const playPCM = useCallback((b64) => {
     const ctx = ctxRef.current;
     if (!ctx) return;
@@ -106,8 +129,16 @@ export default function VoicebotConfig({ ad }) {
       const startAt = Math.max(ctx.currentTime, schedRef.current);
       src.start(startAt);
       schedRef.current = startAt + buf.duration;
+      sourcesRef.current.push(src);
+      isSpeakingRef.current = true;
       setIsSpeaking(true);
-      src.onended = () => { if (!ctxRef.current || schedRef.current <= ctxRef.current.currentTime + 0.05) setIsSpeaking(false); };
+      src.onended = () => {
+        sourcesRef.current = sourcesRef.current.filter(s => s !== src);
+        if (!ctxRef.current || schedRef.current <= ctxRef.current.currentTime + 0.05) {
+          isSpeakingRef.current = false;
+          setIsSpeaking(false);
+        }
+      };
     } catch {}
   }, []);
 
@@ -151,7 +182,7 @@ export default function VoicebotConfig({ ad }) {
         try {
           const msg = JSON.parse(evt.data);
           if (msg.type === "audio" && msg.audio_event?.audio_base_64) playPCM(msg.audio_event.audio_base_64);
-          else if (msg.type === "interruption") { schedRef.current = ctxRef.current?.currentTime ?? 0; setIsSpeaking(false); }
+          else if (msg.type === "interruption") { stopAllSources(); schedRef.current = ctxRef.current?.currentTime ?? 0; isSpeakingRef.current = false; setIsSpeaking(false); }
           else if (msg.type === "ping") ws.send(JSON.stringify({ type: "pong", event_id: msg.ping_event?.event_id }));
         } catch {}
       };
@@ -198,12 +229,7 @@ export default function VoicebotConfig({ ad }) {
 
   const applyRecommendation = () => {
     if (!recommendation) return;
-    // Only update the user-visible fields; conversation_style / language are AI-managed
-    setForm((p) => ({
-      ...p,
-      voice_id:      recommendation.voice_id,
-      first_message: recommendation.first_message,
-    }));
+    setForm((p) => ({ ...p, voice_id: recommendation.voice_id }));
     setRecommendation(null);
   };
 
@@ -211,7 +237,10 @@ export default function VoicebotConfig({ ad }) {
     setProvisioning(true);
     setStatusError(null);
     try {
-      await adsAPI.updateBotConfig(ad.id, form);      // save first
+      // Reset opening message to the standardised default before provisioning
+      const provisionForm = { ...form, first_message: defaultFirstMessage };
+      setForm(provisionForm);
+      await adsAPI.updateBotConfig(ad.id, provisionForm);
       const result = await adsAPI.provisionVoiceAgent(ad.id);
       setAgentStatus({ provisioned: true, agent_id: result.agent_id, name: form.bot_name });
     } catch (err) {
@@ -297,8 +326,8 @@ export default function VoicebotConfig({ ad }) {
                   <span style={{ background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: 6, padding: "2px 8px" }}>
                     Style: {recommendation.conversation_style}
                   </span>
-                  <span style={{ background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: 6, padding: "2px 8px", fontStyle: "italic" }}>
-                    "{recommendation.first_message}"
+                  <span style={{ background: "var(--color-bg)", border: "1px solid var(--color-border)", borderRadius: 6, padding: "2px 8px" }}>
+                    Style: {recommendation.style || recommendation.conversation_style}
                   </span>
                 </div>
               </div>
@@ -328,9 +357,12 @@ export default function VoicebotConfig({ ad }) {
         </div>
         <div>
           <label style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--color-muted)", display: "block", marginBottom: 4 }}>Voice</label>
-          <select value={form.voice_id} onChange={(e) => setForm((p) => ({ ...p, voice_id: e.target.value }))} className="field-select">
-            {ELEVEN_VOICES.map((v) => (
-              <option key={v.id} value={v.id}>{v.label}</option>
+          <select value={form.voice_id} onChange={(e) => setForm((p) => ({ ...p, voice_id: e.target.value }))} className="field-select" disabled={voicesLoading}>
+            {voicesLoading && <option value="">Loading voices…</option>}
+            {voices.map((v) => (
+              <option key={v.voice_id} value={v.voice_id}>
+                {v.name}{v.gender ? ` — ${v.gender.charAt(0).toUpperCase() + v.gender.slice(1)}` : ""}{v.description ? ` · ${v.description}` : ""} · Australian
+              </option>
             ))}
           </select>
         </div>
@@ -340,7 +372,7 @@ export default function VoicebotConfig({ ad }) {
             value={form.first_message}
             onChange={(e) => setForm((p) => ({ ...p, first_message: e.target.value }))}
             className="field-input"
-            placeholder="Hi, this is [Name] with [Organization]. We're enrolling volunteers..."
+            placeholder={defaultFirstMessage}
           />
         </div>
       </div>
