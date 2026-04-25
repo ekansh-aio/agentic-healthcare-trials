@@ -24,13 +24,13 @@ import React, { useState, useEffect, useCallback, Component } from "react";
 import VoicebotPanel, { VOICE_CATALOGUE } from "./VoicebotPanel";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { PageWithSidebar, SectionCard, CampaignStatusBadge } from "../shared/Layout";
-import { adsAPI, companyAPI, surveyAPI, appointmentsAPI } from "../../services/api";
+import { adsAPI, companyAPI, surveyAPI, appointmentsAPI, analysisAPI } from "../../services/api";
 import {
   ArrowLeft, Globe, FileText, CheckCircle2, AlertCircle, ChevronDown,
   Loader2, Layers, Zap, Sparkles,
   Download, Eye, Trash2, ClipboardList, ClipboardCheck, History,
   X as XIcon, RefreshCw, Send, Users,
-  Phone, PhoneCall, Pencil, Copy,
+  Phone, PhoneCall, Pencil, Copy, MessageSquare,
 } from "lucide-react";
 
 // ─── Extracted sub-components ─────────────────────────────────────────────────
@@ -40,6 +40,7 @@ import QuestionnaireSection from "./campaign/QuestionnaireSection";
 import StrategyViewer, { StatusTimeline, AdTypeChip, BudgetDonut, GenericValue, statusIndex } from "./campaign/StrategyViewer";
 import { ReviewPanel, ReviewCard } from "./campaign/ReviewComponents";
 import CreativesViewer from "./campaign/CreativesViewer";
+import ConversationAnalysis from "./campaign/ConversationAnalysis";
 import TrialLocationsCard from "./campaign/TrialLocationsCard";
 import PageTabBar from "./campaign/PageTabBar";
 
@@ -161,6 +162,11 @@ function CampaignDetailPageInner() {
   const [selectedConvHistory, setSelectedConvHistory] = useState(null);
   const [convTranscript,      setConvTranscript]      = useState(null);
   const [convTransLoading,    setConvTransLoading]    = useState(false);
+  // Conversation analysis: maps sessionId → loading bool; analysis lives in the participant object
+  const [analysisLoading,     setAnalysisLoading]     = useState({});
+  // Chat sessions for the chatbot channel
+  const [chatSessions,        setChatSessions]        = useState([]);
+  const [chatSessionsLoading, setChatSessionsLoading] = useState(false);
 
   const saveTitle = async () => {
     const trimmed = titleInput.trim();
@@ -250,6 +256,14 @@ function CampaignDetailPageInner() {
         .then((r) => setConvHistory(r.conversations || []))
         .catch(() => setConvHistory([]))
         .finally(() => setConvHistoryLoading(false));
+    }
+    // Load chatbot sessions
+    if (ad?.ad_type?.includes("chatbot") || ad?.ad_type?.includes("website")) {
+      setChatSessionsLoading(true);
+      analysisAPI.listChatSessions(id)
+        .then((r) => setChatSessions(r.sessions || []))
+        .catch(() => setChatSessions([]))
+        .finally(() => setChatSessionsLoading(false));
     }
   }, [pageTab, id, ad?.ad_type]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1201,13 +1215,50 @@ function CampaignDetailPageInner() {
               title={selectedParticipant.full_name}
               subtitle={`Submitted ${new Date(selectedParticipant.created_at).toLocaleString()}`}
             >
-              <button
-                onClick={() => { setSelectedParticipant(null); setParticipantAppointments([]); }}
-                className="btn--ghost"
-                style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.8rem", marginBottom: 20 }}
-              >
-                <ArrowLeft size={13} /> Back to list
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+                <button
+                  onClick={() => { setSelectedParticipant(null); setParticipantAppointments([]); }}
+                  className="btn--ghost"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.8rem" }}
+                >
+                  <ArrowLeft size={13} /> Back to list
+                </button>
+                {selectedParticipant.voice_sessions?.some(vs => vs.transcripts?.length > 0) && (
+                  <button
+                    onClick={async () => {
+                      const sessionsToAnalyze = selectedParticipant.voice_sessions.filter(vs => vs.transcripts?.length > 0);
+                      const loadingMap = {};
+                      sessionsToAnalyze.forEach(vs => { loadingMap[vs.id] = true; });
+                      setAnalysisLoading(prev => ({ ...prev, ...loadingMap }));
+                      try {
+                        const results = await analysisAPI.analyzeParticipant(id, selectedParticipant.id);
+                        const analysisById = {};
+                        (results.analyses || []).forEach(r => {
+                          if (r.analysis) analysisById[r.session_id] = r.analysis;
+                        });
+                        setSelectedParticipant(prev => ({
+                          ...prev,
+                          voice_sessions: prev.voice_sessions.map(vs =>
+                            analysisById[vs.id] ? { ...vs, call_analysis: analysisById[vs.id] } : vs
+                          ),
+                        }));
+                      } catch (e) {
+                        console.error("Bulk analysis failed", e);
+                      } finally {
+                        setAnalysisLoading(prev => {
+                          const next = { ...prev };
+                          sessionsToAnalyze.forEach(vs => { delete next[vs.id]; });
+                          return next;
+                        });
+                      }
+                    }}
+                    className="btn--ghost"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.78rem" }}
+                  >
+                    <Sparkles size={12} /> Analyze All Calls
+                  </button>
+                )}
+              </div>
 
               {/* Personal details */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16, marginBottom: 24 }}>
@@ -1225,16 +1276,16 @@ function CampaignDetailPageInner() {
                 ))}
               </div>
 
-              {/* Voice call transcript */}
+              {/* Voice call transcript + AI analysis */}
               {selectedParticipant.voice_sessions?.length > 0 && (
                 <div style={{ marginBottom: 24 }}>
                   <p style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>
-                    Voice Call Transcript
+                    Voice Calls
                   </p>
                   {selectedParticipant.voice_sessions.map((vs) => (
-                    <div key={vs.id} style={{ border: "1px solid var(--color-card-border)", borderRadius: 10, overflow: "hidden", marginBottom: 12 }}>
+                    <div key={vs.id} style={{ border: "1px solid var(--color-card-border)", borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
                       {/* Session header */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", backgroundColor: "var(--color-page-bg)", borderBottom: vs.transcripts?.length > 0 ? "1px solid var(--color-card-border)" : "none" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", backgroundColor: "var(--color-page-bg)", borderBottom: "1px solid var(--color-card-border)" }}>
                         <Phone size={14} style={{ color: "var(--color-accent)", flexShrink: 0 }} />
                         <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--color-input-text)" }}>
                           {vs.phone || "Unknown number"}
@@ -1255,9 +1306,36 @@ function CampaignDetailPageInner() {
                           {new Date(vs.started_at).toLocaleString()}
                         </span>
                       </div>
-                      {/* Transcript turns */}
+
+                      {/* AI Analysis panel */}
+                      <div style={{ padding: "14px 16px", borderBottom: vs.transcripts?.length > 0 ? "1px solid var(--color-card-border)" : "none", backgroundColor: "var(--color-card-bg)" }}>
+                        <ConversationAnalysis
+                          analysis={vs.call_analysis}
+                          sessionId={vs.id}
+                          loading={!!analysisLoading[vs.id]}
+                          onReanalyze={vs.transcripts?.length > 0 ? async () => {
+                            setAnalysisLoading(prev => ({ ...prev, [vs.id]: true }));
+                            try {
+                              const result = await analysisAPI.analyzeVoiceSession(id, vs.id);
+                              // Patch the in-memory participant object so UI updates without a full refetch
+                              setSelectedParticipant(prev => ({
+                                ...prev,
+                                voice_sessions: prev.voice_sessions.map(s =>
+                                  s.id === vs.id ? { ...s, call_analysis: result } : s
+                                ),
+                              }));
+                            } catch (e) {
+                              console.error("Analysis failed", e);
+                            } finally {
+                              setAnalysisLoading(prev => ({ ...prev, [vs.id]: false }));
+                            }
+                          } : null}
+                        />
+                      </div>
+
+                      {/* Transcript turns (collapsible feel via max-height) */}
                       {vs.transcripts?.length > 0 ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 0, maxHeight: 360, overflowY: "auto", padding: "12px 16px" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 0, maxHeight: 320, overflowY: "auto", padding: "12px 16px" }}>
                           {[...vs.transcripts].sort((a, b) => (a.turn_index ?? 0) - (b.turn_index ?? 0)).map((turn, ti) => (
                             <div key={ti} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "flex-start" }}>
                               <span style={{
@@ -1281,7 +1359,7 @@ function CampaignDetailPageInner() {
                         </div>
                       ) : (
                         <p style={{ fontSize: "0.8rem", color: "var(--color-sidebar-text)", padding: "12px 16px" }}>
-                          No transcript available yet.
+                          No transcript available yet. Sync transcripts first to enable analysis.
                         </p>
                       )}
                     </div>
@@ -1531,6 +1609,83 @@ function CampaignDetailPageInner() {
                         .then((r) => setConvHistory(r.conversations || []))
                         .catch(() => {})
                         .finally(() => setConvHistoryLoading(false));
+                    }}
+                    className="btn--ghost"
+                    style={{ fontSize: "0.78rem", display: "inline-flex", alignItems: "center", gap: 6 }}
+                  >
+                    <RefreshCw size={12} /> Refresh
+                  </button>
+                </div>
+              </SectionCard>
+            )}
+
+          {/* Chat Sessions — website/chatbot campaigns */}
+            {(ad.ad_type?.includes("chatbot") || ad.ad_type?.includes("website")) && (
+              <SectionCard
+                title="Chatbot Sessions"
+                subtitle="Conversations from the landing page chatbot"
+              >
+                {chatSessionsLoading ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--color-sidebar-text)", fontSize: "0.82rem" }}>
+                    <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Loading…
+                  </div>
+                ) : chatSessions.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "32px 0" }}>
+                    <MessageSquare size={28} style={{ color: "var(--color-card-border)", margin: "0 auto 10px" }} />
+                    <p style={{ color: "var(--color-sidebar-text)", fontSize: "0.85rem" }}>No chat sessions yet.</p>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {chatSessions.map((cs) => {
+                      const identifier = cs.session_id?.slice(0, 12) ?? cs.id?.slice(0, 12);
+                      return (
+                        <div key={cs.id} style={{ border: "1px solid var(--color-card-border)", borderRadius: 10, overflow: "hidden" }}>
+                          {/* Header */}
+                          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", backgroundColor: "var(--color-page-bg)", borderBottom: "1px solid var(--color-card-border)" }}>
+                            <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--color-input-text)", fontFamily: "ui-monospace, monospace" }}>
+                              visitor·{identifier}
+                            </span>
+                            <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", marginLeft: "auto" }}>
+                              {cs.message_count} messages
+                            </span>
+                            <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)" }}>
+                              {cs.created_at ? new Date(cs.created_at).toLocaleString() : ""}
+                            </span>
+                          </div>
+                          {/* Analysis */}
+                          <div style={{ padding: "14px 16px", backgroundColor: "var(--color-card-bg)" }}>
+                            <ConversationAnalysis
+                              analysis={cs.chat_analysis}
+                              sessionId={cs.id}
+                              loading={!!analysisLoading[cs.id]}
+                              onReanalyze={async () => {
+                                setAnalysisLoading(prev => ({ ...prev, [cs.id]: true }));
+                                try {
+                                  const result = await analysisAPI.analyzeChatSession(id, cs.id);
+                                  setChatSessions(prev => prev.map(s =>
+                                    s.id === cs.id ? { ...s, chat_analysis: result } : s
+                                  ));
+                                } catch (e) {
+                                  console.error("Chat analysis failed", e);
+                                } finally {
+                                  setAnalysisLoading(prev => ({ ...prev, [cs.id]: false }));
+                                }
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <div style={{ marginTop: 12 }}>
+                  <button
+                    onClick={() => {
+                      setChatSessionsLoading(true);
+                      analysisAPI.listChatSessions(id)
+                        .then((r) => setChatSessions(r.sessions || []))
+                        .catch(() => {})
+                        .finally(() => setChatSessionsLoading(false));
                     }}
                     className="btn--ghost"
                     style={{ fontSize: "0.78rem", display: "inline-flex", alignItems: "center", gap: 6 }}

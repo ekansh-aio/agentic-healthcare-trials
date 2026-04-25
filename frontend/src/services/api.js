@@ -819,6 +819,23 @@ export const surveyAPI = {
     request(`/advertisements/${adId}/sync-voice-transcripts`, { method: "POST" }),
 };
 
+export const analysisAPI = {
+  // Analyze all voice sessions for a participant
+  analyzeParticipant: (adId, responseId) =>
+    request(`/advertisements/${adId}/survey-responses/${responseId}/analyze`, { method: "POST" }),
+
+  // Analyze a single voice session
+  analyzeVoiceSession: (adId, sessionId) =>
+    request(`/advertisements/${adId}/voice-sessions/${sessionId}/analyze`, { method: "POST" }),
+
+  // List + analyze chatbot sessions for a campaign
+  listChatSessions: (adId) =>
+    request(`/advertisements/${adId}/chat-sessions`),
+
+  analyzeChatSession: (adId, sessionId) =>
+    request(`/advertisements/${adId}/chat-sessions/${sessionId}/analyze`, { method: "POST" }),
+};
+
 export const appointmentsAPI = {
   list: (adId) => request(`/advertisements/${adId}/appointments`),
 };
