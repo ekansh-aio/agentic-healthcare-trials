@@ -5,7 +5,7 @@ Voice agent routes: provision, status, outbound calls, transcripts, conversation
 import logging
 import re
 from datetime import datetime, date, timedelta, timezone
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
