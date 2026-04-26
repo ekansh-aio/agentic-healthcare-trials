@@ -24,11 +24,12 @@ import json
 import logging
 import time
 import uuid as _uuid_mod
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from urllib.parse import urlparse
@@ -39,6 +40,8 @@ from app.core.bedrock import get_async_client, get_model, is_configured
 from app.core.config import settings
 from app.db.database import get_db
 from app.models.models import Advertisement, ChatSession
+from app.models.survey import Appointment
+from app.api.routes.bookings import _booking_config, _campaign_window, _generate_slots
 
 
 def _get_chat_client():
@@ -76,19 +79,27 @@ _ad_cache: dict = {}
 _CACHE_TTL = 300  # seconds
 
 
-_STRATEGY_BUDGET_KEYS = {"budget_breakdown", "budget_allocation", "budget", "media_budget", "spend"}
+# Keys stripped from strategy_json before it is passed to the LLM.
+# Budget and participant/enrollment counts must never reach the chatbot context.
+_PRIVATE_STRATEGY_KEYS = {
+    # budget
+    "budget_breakdown", "budget_allocation", "budget", "media_budget", "spend",
+    # participant / enrollment targets
+    "patients_required", "enrollment_target", "sample_size", "participant_count",
+    "target_enrollment", "recruitment_target", "quota", "headcount",
+}
 
-
-def _strip_budget(obj):
-    """Recursively remove budget-related keys from strategy_json before caching."""
+def _strip_private(obj):
+    """Recursively remove private keys from strategy_json before the LLM sees it."""
     if isinstance(obj, dict):
         return {
-            k: _strip_budget(v)
+            k: _strip_private(v)
             for k, v in obj.items()
-            if k.lower() not in _STRATEGY_BUDGET_KEYS and "budget" not in k.lower()
+            if k.lower() not in _PRIVATE_STRATEGY_KEYS
+            and not any(kw in k.lower() for kw in ("budget", "patient", "participant", "enroll", "quota", "sample_size"))
         }
     if isinstance(obj, list):
-        return [_strip_budget(i) for i in obj]
+        return [_strip_private(i) for i in obj]
     return obj
 
 
@@ -101,12 +112,12 @@ def _ad_to_dict(ad: Advertisement) -> dict:
         "trial_start_date":  str(ad.trial_start_date) if ad.trial_start_date else None,
         "trial_end_date":    str(ad.trial_end_date)   if ad.trial_end_date   else None,
         "trial_location":    ad.trial_location,
-        "patients_required": ad.patients_required,
+        # patients_required and budget excluded — must never reach the LLM context
         "bot_config":        ad.bot_config,
+        "booking_config":    ad.booking_config,
         "strategy_json":     _strip_budget(ad.strategy_json),   # budget fields removed
         "website_reqs":      ad.website_reqs,
         "questionnaire":     ad.questionnaire,
-        # ad.budget (top-level column) intentionally excluded
     }
 
 
@@ -123,6 +134,202 @@ async def _load_ad(ad_id: str, db: AsyncSession) -> Optional[dict]:
         _ad_cache[ad_id] = {"data": data, "ts": now}
         return data
     return None
+
+
+# ── Chat booking tools ─────────────────────────────────────────────────────────
+# These are injected into the LLM tool call list so the chatbot can check
+# slot availability and book appointments server-side during a conversation.
+
+CHAT_TOOLS_OPENAI = [
+    {
+        "type": "function",
+        "function": {
+            "name": "check_available_slots",
+            "description": (
+                "Check which appointment slots are available on a given date for this campaign. "
+                "Call this before book_appointment to confirm availability."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "Date in YYYY-MM-DD format",
+                    },
+                },
+                "required": ["date"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "book_appointment",
+            "description": (
+                "Book a screening appointment for the visitor. "
+                "Only call this after the visitor has confirmed they want to book and provided their name, phone, and preferred slot."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "patient_name":   {"type": "string", "description": "Full name of the participant"},
+                    "patient_phone":  {"type": "string", "description": "Contact phone number"},
+                    "slot_datetime":  {"type": "string", "description": "Exact slot datetime in ISO format, e.g. '2026-06-01T10:00:00'"},
+                    "notes":          {"type": "string", "description": "Any additional notes from the conversation"},
+                },
+                "required": ["patient_name", "patient_phone", "slot_datetime"],
+            },
+        },
+    },
+]
+
+CHAT_TOOLS_ANTHROPIC = [
+    {
+        "name": "check_available_slots",
+        "description": (
+            "Check which appointment slots are available on a given date for this campaign. "
+            "Call this before book_appointment to confirm availability."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date": {"type": "string", "description": "Date in YYYY-MM-DD format"},
+            },
+            "required": ["date"],
+        },
+    },
+    {
+        "name": "book_appointment",
+        "description": (
+            "Book a screening appointment for the visitor. "
+            "Only call this after the visitor has confirmed they want to book and provided their name, phone, and preferred slot."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "patient_name":  {"type": "string", "description": "Full name of the participant"},
+                "patient_phone": {"type": "string", "description": "Contact phone number"},
+                "slot_datetime": {"type": "string", "description": "Exact slot datetime in ISO format, e.g. '2026-06-01T10:00:00'"},
+                "notes":         {"type": "string", "description": "Any additional notes from the conversation"},
+            },
+            "required": ["patient_name", "patient_phone", "slot_datetime"],
+        },
+    },
+]
+
+
+async def _execute_chat_tool(tool_name: str, tool_args: dict, campaign_id: str, db: AsyncSession, chat_session_db_id: Optional[str] = None) -> str:
+    """Execute a chat tool call server-side and return a JSON string result."""
+    ad = await db.get(Advertisement, campaign_id)
+    if not ad:
+        return json.dumps({"error": "Campaign not found"})
+
+    if tool_name == "check_available_slots":
+        date_str = tool_args.get("date", "")
+        try:
+            req_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return json.dumps({"error": f"Invalid date format: {date_str}. Use YYYY-MM-DD."})
+
+        win_start, win_end = _campaign_window(ad)
+        if req_date < win_start or req_date > win_end:
+            return json.dumps({"available_slots": [], "message": f"Date {date_str} is outside the booking window ({win_start} to {win_end})."})
+
+        bc       = _booking_config(ad)
+        duration = bc["slot_duration_minutes"]
+        capacity = bc["max_per_slot"]
+        all_slots = _generate_slots(duration)
+
+        day_start = datetime(req_date.year, req_date.month, req_date.day)
+        day_end   = day_start + timedelta(days=1)
+
+        count_rows = await db.execute(
+            select(Appointment.slot_datetime, func.count(Appointment.id).label("cnt"))
+            .where(
+                Appointment.advertisement_id == campaign_id,
+                Appointment.status == "confirmed",
+                Appointment.slot_datetime >= day_start,
+                Appointment.slot_datetime < day_end,
+            )
+            .group_by(Appointment.slot_datetime)
+        )
+        booked: dict = {row.slot_datetime.strftime("%H:%M"): row.cnt for row in count_rows.all()}
+
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        available = []
+        for s in all_slots:
+            slot_dt = datetime(req_date.year, req_date.month, req_date.day, *map(int, s["time"].split(":")))
+            if slot_dt > now_utc and booked.get(s["time"], 0) < capacity:
+                available.append({"time": s["time"], "label": s["label"]})
+
+        return json.dumps({
+            "date": date_str,
+            "available_slots": available,
+            "slot_duration_minutes": duration,
+        })
+
+    if tool_name == "book_appointment":
+        patient_name  = tool_args.get("patient_name", "")
+        patient_phone = tool_args.get("patient_phone", "")
+        slot_str      = tool_args.get("slot_datetime", "")
+        notes         = tool_args.get("notes")
+
+        if not patient_name or not patient_phone or not slot_str:
+            return json.dumps({"error": "patient_name, patient_phone, and slot_datetime are all required."})
+
+        try:
+            slot_dt = datetime.fromisoformat(slot_str).replace(tzinfo=None)
+        except ValueError:
+            return json.dumps({"error": f"Invalid slot_datetime format: {slot_str}"})
+
+        win_start, win_end = _campaign_window(ad)
+        req_date = slot_dt.date()
+        if req_date < win_start or req_date > win_end:
+            return json.dumps({"error": f"Slot date {req_date} is outside the campaign booking window ({win_start} to {win_end})."})
+
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        if slot_dt <= now_utc:
+            return json.dumps({"error": "Cannot book a slot in the past."})
+
+        bc       = _booking_config(ad)
+        duration = bc["slot_duration_minutes"]
+        capacity = bc["max_per_slot"]
+
+        count_result = await db.execute(
+            select(func.count(Appointment.id))
+            .where(
+                Appointment.advertisement_id == campaign_id,
+                Appointment.status == "confirmed",
+                Appointment.slot_datetime == slot_dt,
+            )
+        )
+        if count_result.scalar_one() >= capacity:
+            return json.dumps({"error": "This slot is fully booked. Please choose another time."})
+
+        appt = Appointment(
+            advertisement_id=campaign_id,
+            chat_session_id=chat_session_db_id,
+            patient_name=patient_name,
+            patient_phone=patient_phone,
+            slot_datetime=slot_dt,
+            duration_minutes=duration,
+            status="confirmed",
+            notes=notes,
+        )
+        db.add(appt)
+        await db.commit()
+        await db.refresh(appt)
+
+        logger.info("Chat booking created: ad=%s appointment=%s slot=%s patient=%s", campaign_id, appt.id, slot_dt, patient_name)
+        return json.dumps({
+            "success": True,
+            "appointment_id": appt.id,
+            "slot_datetime": slot_dt.isoformat(),
+            "duration_minutes": duration,
+            "message": f"Appointment confirmed for {patient_name} on {slot_dt.strftime('%B %d, %Y at %I:%M %p').replace(' 0', ' ')}.",
+        })
+
+    return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -174,6 +381,12 @@ def _build_system_prompt(ad: dict) -> str:
         "Be warm, concise, and empathetic. Refer complex medical questions to the trial team.",
         "Never provide medical advice or diagnoses. Never guarantee eligibility.",
         "Keep replies under 3 sentences unless the visitor clearly needs more detail.",
+        "",
+        "━━ CONVERSATIONAL RULES (always apply these) ━━",
+        "1. Always use a natural, friendly conversational tone — never sound like a form or a quiz.",
+        "2. Ask ONLY ONE question per reply. Never bundle two or more questions in a single message.",
+        "   Wait for the visitor's answer before moving on to the next question.",
+        "3. Do not number questions or present answer choices as a list unless the visitor explicitly asks for options.",
         "",
         "━━ STRICT PRIVACY RULES (never violate these) ━━",
         "1. Never reveal how many participants are being recruited or any enrollment targets.",
@@ -238,14 +451,20 @@ def _build_system_prompt(ad: dict) -> str:
 
     # ── Screening questions (guide conversation, do not run as a rigid quiz) ───
     if questions:
-        lines += ["", "━━ SCREENING QUESTIONS (use to guide eligibility conversation naturally) ━━"]
+        lines += [
+            "",
+            "━━ SCREENING QUESTIONS ━━",
+            "Use these to guide the eligibility conversation. Ask them one at a time, in natural language.",
+            "Never present all questions at once. Never use numbered lists or MCQ-style formatting.",
+            "Acknowledge the visitor's answer briefly before moving to the next question.",
+        ]
         for q in questions:
             text = q.get("text") or q.get("question", "")
             opts = q.get("options", [])
             if text:
                 lines += [f"Q: {text}"]
             if opts:
-                lines += [f"   Options: {', '.join(str(o) for o in opts)}"]
+                lines += [f"   Options (for your reference only — do not list these to the visitor): {', '.join(str(o) for o in opts)}"]
 
     # ── Approved FAQs (safe to share verbatim) ─────────────────────────────────
     if faqs:
@@ -259,6 +478,28 @@ def _build_system_prompt(ad: dict) -> str:
             lines += [f"- {flag}"]
         if compliance:
             lines += [f"- {compliance}"]
+
+    # ── Booking tools guidance ─────────────────────────────────────────────────
+    lines += [
+        "",
+        "━━ APPOINTMENT BOOKING ━━",
+        "You have two tools available:",
+        "  check_available_slots(date) — show available slots for a date (YYYY-MM-DD).",
+        "  book_appointment(patient_name, patient_phone, slot_datetime, notes) — confirm a booking.",
+        "",
+        "Booking flow:",
+        "1. If the visitor expresses interest in participating, ask if they'd like to book a screening appointment.",
+        "2. Before asking about dates or times, ask the visitor what city/timezone they are in.",
+        "   Use their answer to interpret any times they mention (e.g. '4:30 PM Melbourne' = AEST).",
+        "   Slot datetimes must be stored in the campaign's local timezone — convert accordingly.",
+        "3. Ask for their preferred date, then call check_available_slots to show real options.",
+        "   NEVER guess or invent slot times — you MUST call check_available_slots and present",
+        "   only the slots returned by that tool. If a visitor asks for 'right now' or 'ASAP',",
+        "   call check_available_slots for today's date and offer the earliest available slot.",
+        "4. Once they pick a slot, confirm their name and phone number.",
+        "5. Call book_appointment with the exact ISO datetime (YYYY-MM-DDTHH:MM:SS).",
+        "6. Read the confirmation back to the visitor warmly.",
+    ]
 
     return "\n".join(lines)
 
@@ -343,34 +584,84 @@ async def chat(
     messages = [{"role": m["role"], "content": m["content"]} for m in history]
     messages.append({"role": "user", "content": body.message})
 
-    # 5. Call GPT-5 (Azure OpenAI) → OpenAI → Anthropic fallback → mock
+    # 5. Call GPT / Anthropic with booking tools enabled
     oai_client = _get_chat_client()
     system_prompt = _build_system_prompt(ad)
+    reply = ""
 
     if oai_client is not None:
         try:
             oai_messages = [{"role": "system", "content": system_prompt}] + messages
-            response = await oai_client.chat.completions.create(
-                model=settings.AZURE_CHAT_DEPLOYMENT,
-                max_completion_tokens=1024,
-                messages=oai_messages,
-            )
-            choice = response.choices[0]
-            print(f"[CHAT DEBUG] finish_reason={choice.finish_reason!r} content={choice.message.content!r}", flush=True)
-            reply = (choice.message.content or "").strip()
+
+            # Tool-call loop — model may call check_available_slots / book_appointment
+            # before producing a final text reply.
+            for _turn in range(5):   # safety cap to prevent infinite loops
+                response = await oai_client.chat.completions.create(
+                    model=settings.AZURE_CHAT_DEPLOYMENT,
+                    max_completion_tokens=1024,
+                    messages=oai_messages,
+                    tools=CHAT_TOOLS_OPENAI,
+                    tool_choice="auto",
+                )
+                choice = response.choices[0]
+                print(f"[CHAT DEBUG] finish_reason={choice.finish_reason!r} content={choice.message.content!r}", flush=True)
+
+                if choice.finish_reason == "tool_calls":
+                    # Execute all tool calls, append results, then loop
+                    oai_messages.append(choice.message)   # assistant message with tool_calls
+                    for tc in choice.message.tool_calls:
+                        tool_args = json.loads(tc.function.arguments)
+                        tool_result = await _execute_chat_tool(tc.function.name, tool_args, campaign_id, db, session.id)
+                        oai_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": tool_result,
+                        })
+                else:
+                    reply = (choice.message.content or "").strip()
+                    break
+            else:
+                reply = "I'm sorry, I ran into a problem processing your request. Please try again."
+
         except Exception as exc:
             logger.error("Chat Azure/OpenAI error for campaign %s: %s", campaign_id, exc)
             raise HTTPException(status_code=502, detail="AI service temporarily unavailable")
+
     elif is_configured():
         try:
-            client   = get_async_client()
-            response = await client.messages.create(
-                model=get_model(),
-                max_tokens=512,
-                system=system_prompt,
-                messages=messages,
-            )
-            reply = response.content[0].text.strip()
+            client = get_async_client()
+            anthropic_messages = list(messages)
+
+            # Tool-call loop for Anthropic
+            for _turn in range(5):
+                response = await client.messages.create(
+                    model=get_model(),
+                    max_tokens=1024,
+                    system=system_prompt,
+                    messages=anthropic_messages,
+                    tools=CHAT_TOOLS_ANTHROPIC,
+                )
+
+                if response.stop_reason == "tool_use":
+                    # Append assistant message, execute tools, append results
+                    anthropic_messages.append({"role": "assistant", "content": response.content})
+                    tool_results = []
+                    for block in response.content:
+                        if block.type == "tool_use":
+                            tool_result = await _execute_chat_tool(block.name, block.input, campaign_id, db, session.id)
+                            tool_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": block.id,
+                                "content": tool_result,
+                            })
+                    anthropic_messages.append({"role": "user", "content": tool_results})
+                else:
+                    text_blocks = [b for b in response.content if hasattr(b, "text")]
+                    reply = text_blocks[0].text.strip() if text_blocks else ""
+                    break
+            else:
+                reply = "I'm sorry, I ran into a problem processing your request. Please try again."
+
         except Exception as exc:
             logger.error("Chat LLM error for campaign %s: %s", campaign_id, exc)
             raise HTTPException(status_code=502, detail="AI service temporarily unavailable")

@@ -207,15 +207,21 @@ async def _next_sleep(now: datetime) -> float:
         async with async_session_factory() as session:
             result = await session.execute(select(Advertisement))
             for ad in result.scalars().all():
-                bc    = ad.bot_config if isinstance(ad.bot_config, dict) else {}
-                sched = bc.get("pause_schedule")
-                if not sched:
+                try:
+                    bc = ad.bot_config if isinstance(ad.bot_config, dict) else {}
+                    sched = bc.get("pause_schedule")
+                    if not sched:
+                        continue
+                    secs = _next_transition_seconds_for_schedule(sched, now)
+                    if secs is not None and secs > 0:
+                        earliest = secs if earliest is None else min(earliest, secs)
+                except Exception as inner_exc:
+                    # Skip ads with malformed bot_config
+                    logger.debug("Scheduler: skipping ad %s due to error: %s", ad.id, inner_exc)
                     continue
-                secs = _next_transition_seconds_for_schedule(sched, now)
-                if secs is not None and secs > 0:
-                    earliest = secs if earliest is None else min(earliest, secs)
     except Exception as exc:
-        logger.error("Scheduler: error computing next sleep: %s", exc)
+        import traceback
+        logger.error("Scheduler: error computing next sleep: %s\n%s", exc, traceback.format_exc())
 
     if earliest is None:
         return float(_NO_SCHEDULE_POLL)

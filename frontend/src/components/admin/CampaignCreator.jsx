@@ -209,7 +209,11 @@ function DateRangePicker({ startDate, endDate, onChange }) {
   const start = parseYMD(startDate);
   const end   = parseYMD(endDate);
 
+  const todayYMD = toYMD(today);
+
   function prevMonth() {
+    // Never navigate before the current month
+    if (viewYear === today.getFullYear() && viewMonth === today.getMonth()) return;
     if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); }
     else setViewMonth(m => m - 1);
   }
@@ -264,27 +268,27 @@ function DateRangePicker({ startDate, endDate, onChange }) {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", rowGap: 2 }}>
           {cells.map((day, idx) => {
             if (!day) return <div key={idx} />;
-            const ymd  = `${year}-${String(month + 1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-            const sel  = isStart(ymd) || isEnd(ymd);
-            const inR  = isInRange(ymd);
-            const isToday = ymd === toYMD(today);
+            const ymd     = `${year}-${String(month + 1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+            const sel     = isStart(ymd) || isEnd(ymd);
+            const inR     = isInRange(ymd);
+            const isToday = ymd === todayYMD;
+            const isPast  = ymd < todayYMD;
 
             return (
               <div
                 key={ymd}
-                onClick={() => handleDayClick(ymd)}
-                onMouseEnter={() => setHovered(ymd)}
+                onClick={() => !isPast && handleDayClick(ymd)}
+                onMouseEnter={() => !isPast && setHovered(ymd)}
                 onMouseLeave={() => setHovered(null)}
                 style={{
                   position: "relative",
                   textAlign: "center",
-                  cursor: "pointer",
+                  cursor: isPast ? "default" : "pointer",
                   userSelect: "none",
                   padding: "5px 0",
-                  // range background spans full cell
-                  backgroundColor: inR ? "rgba(16,185,129,0.12)" : "transparent",
-                  // round left edge for start, right edge for end
+                  backgroundColor: inR && !isPast ? "rgba(16,185,129,0.12)" : "transparent",
                   borderRadius: isStart(ymd) ? "999px 0 0 999px" : isEnd(ymd) ? "0 999px 999px 0" : 0,
+                  opacity: isPast ? 0.3 : 1,
                 }}
               >
                 <span style={{
@@ -369,7 +373,7 @@ function DateRangePicker({ startDate, endDate, onChange }) {
         {/* Left month */}
         <div style={{ flex: 1, minWidth: 240 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <button type="button" onClick={prevMonth} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-accent)", display: "flex", padding: 4, borderRadius: 6 }}>
+            <button type="button" onClick={prevMonth} disabled={viewYear === today.getFullYear() && viewMonth === today.getMonth()} style={{ background: "none", border: "none", cursor: (viewYear === today.getFullYear() && viewMonth === today.getMonth()) ? "default" : "pointer", color: "var(--color-accent)", display: "flex", padding: 4, borderRadius: 6, opacity: (viewYear === today.getFullYear() && viewMonth === today.getMonth()) ? 0.3 : 1 }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
             <span style={{ fontSize: "0.88rem", fontWeight: 700, color: "var(--color-input-text)" }}>
@@ -588,7 +592,8 @@ export default function CampaignCreator() {
     ad_types: ["website", "ads", "voicebot", "chatbot"], // always all four
     campaign_category: "",
     social_platforms: [], // populated via SMM branch in Step 1
-    first_visit_duration: "", // e.g. "01:30"
+    slot_duration_minutes: "30",  // booking window slot size
+    max_per_slot: "3",            // max bookings per slot
     budget: "",
     start_date: "",
     end_date: "",
@@ -643,6 +648,9 @@ export default function CampaignCreator() {
     setLoading(true);
     try {
       // Step 1 — create the advertisement record
+      const slotDur = parseInt(form.slot_duration_minutes, 10);
+      const maxSlot = parseInt(form.max_per_slot, 10);
+
       const ad = await adsAPI.create({
         title:             form.title,
         ad_type:           form.ad_types,
@@ -656,6 +664,10 @@ export default function CampaignCreator() {
         trial_location:    form.trial_location.length > 0 ? form.trial_location : null,
         patients_required:    form.patients_required ? parseInt(form.patients_required, 10) : null,
         special_instructions: form.special_instructions.trim() || null,
+        booking_config: {
+          slot_duration_minutes: isNaN(slotDur) || slotDur < 5 ? 30 : slotDur,
+          max_per_slot:          isNaN(maxSlot) || maxSlot < 1 ? 3  : maxSlot,
+        },
       });
 
       // Step 2 — upload each protocol document scoped to this campaign
@@ -1123,35 +1135,33 @@ export default function CampaignCreator() {
                   )}
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: "var(--color-input-text)" }}>
-                    First Visit Duration <span style={{ fontWeight: 400, color: "var(--color-sidebar-text)" }}>(optional)</span>
-                  </label>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {/* ── Booking window config ── */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+                  <div>
+                    <label className="block text-sm font-medium mb-1" style={{ color: "var(--color-input-text)" }}>
+                      Slot Duration (minutes)
+                      <span style={{ fontWeight: 400, color: "var(--color-sidebar-text)", marginLeft: 6 }}>(optional)</span>
+                    </label>
                     <input
-                      type="time"
-                      value={form.first_visit_duration}
-                      onChange={(e) => update("first_visit_duration", e.target.value)}
+                      type="number" min="5" max="480"
+                      value={form.slot_duration_minutes}
+                      onChange={(e) => update("slot_duration_minutes", e.target.value)}
+                      placeholder="30"
                       className="field-input"
-                      style={{ maxWidth: 160 }}
                     />
-                    {form.first_visit_duration && (
-                      <span style={{
-                        display: "inline-flex", alignItems: "center", gap: 6,
-                        padding: "5px 12px", borderRadius: 999, fontSize: "0.78rem",
-                        fontWeight: 500, backgroundColor: "rgba(16,185,129,0.1)",
-                        border: "1px solid var(--color-accent)", color: "var(--color-accent)",
-                      }}>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                        {(() => {
-                          const [h, m] = form.first_visit_duration.split(":").map(Number);
-                          const parts = [];
-                          if (h) parts.push(`${h}h`);
-                          if (m) parts.push(`${m}min`);
-                          return parts.join(" ");
-                        })()}
-                      </span>
-                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1" style={{ color: "var(--color-input-text)" }}>
+                      Max Bookings per Slot
+                      <span style={{ fontWeight: 400, color: "var(--color-sidebar-text)", marginLeft: 6 }}>(optional)</span>
+                    </label>
+                    <input
+                      type="number" min="1" max="500"
+                      value={form.max_per_slot}
+                      onChange={(e) => update("max_per_slot", e.target.value)}
+                      placeholder="3"
+                      className="field-input"
+                    />
                   </div>
                 </div>
 

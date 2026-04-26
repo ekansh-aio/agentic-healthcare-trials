@@ -312,7 +312,7 @@ function RegistrationStep({ adId, surveyAnswers, isEligible, onSubmitted }) {
 }
 
 // ── Step 3: Book Appointment ─────────────────────────────────────────────────
-function BookingStep({ adId, surveyResponseId, patientName, patientPhone, onBooked, onSkip }) {
+function BookingStep({ adId, surveyResponseId, patientName, patientPhone, onBooked, onSkip, windowStart, windowEnd }) {
   const [selectedDate, setSelectedDate] = useState("");
   const [slots, setSlots]               = useState([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
@@ -320,12 +320,21 @@ function BookingStep({ adId, surveyResponseId, patientName, patientPhone, onBook
   const [booking, setBooking]           = useState(false);
   const [error, setError]               = useState("");
 
-  // Generate next 14 days as date options
-  const dateOptions = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    return d.toISOString().split("T")[0];
-  });
+  // Build date options from the campaign booking window only
+  const dateOptions = (() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = windowStart ? new Date(windowStart + "T00:00:00") : today;
+    const end   = windowEnd   ? new Date(windowEnd   + "T00:00:00") : new Date(today.getTime() + 30 * 86400000);
+    const from  = start < today ? today : start;
+    const opts  = [];
+    const cur   = new Date(from);
+    while (cur <= end && opts.length < 120) {
+      opts.push(cur.toISOString().split("T")[0]);
+      cur.setDate(cur.getDate() + 1);
+    }
+    return opts;
+  })();
 
   useEffect(() => {
     if (!selectedDate) return;
@@ -584,6 +593,8 @@ export default function SurveyPage() {
               surveyResponseId={surveyResponseId}
               patientName={patientInfo.name}
               patientPhone={patientInfo.phone}
+              windowStart={campaign?.booking_window_start}
+              windowEnd={campaign?.booking_window_end}
               onBooked={() => {
                 setAppointmentBooked(true);
                 setStep("done");

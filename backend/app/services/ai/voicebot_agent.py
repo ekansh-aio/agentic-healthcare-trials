@@ -30,14 +30,14 @@ logger = logging.getLogger(__name__)
 ELEVENLABS_BASE = "https://api.elevenlabs.io"
 
 # ── Australian conversational voice profiles ──────────────────────────────────
-# All campaigns run Australian-accented voices on eleven_multilingual_v3.
+# All campaigns run Australian-accented voices on eleven_multilingual_v2.
 # Profiles are ordered by warmth/suitability for healthcare/clinical trial calls.
 #
-# Voice settings per profile are tuned for maximum human-like expressiveness:
-#   stability       0.35 — allows natural pitch variation and emotional colour
+# Voice settings per profile are tuned for clear turn detection and interruption handling:
+#   stability       0.55 — more predictable pauses for better VAD detection
 #   similarity_boost 0.80 — stays true to the voice character
-#   style           0.55 — expressive enough to convey empathy without overdoing it
-#   use_speaker_boost True — cleaner, more present sound on phone audio
+#   style           0.35 — less expressive to reduce trailing audio artifacts
+#   use_speaker_boost False — prevents volume bias in VAD interruption detection
 #
 # To find new voice IDs: ElevenLabs dashboard → Voice Library → filter "Australian"
 
@@ -48,7 +48,7 @@ AUSTRALIAN_VOICES = [
         "gender": "female",
         "style":  "warm",
         "traits": "Warm, bright, genuinely friendly. Sounds like a trusted friend — ideal for wellness, healthcare, empathetic outreach.",
-        "settings": {"stability": 0.35, "similarity_boost": 0.82, "style": 0.55, "use_speaker_boost": True},
+        "settings": {"stability": 0.55, "similarity_boost": 0.82, "style": 0.35, "use_speaker_boost": False},
     },
     {
         "id":     "IKne3meq5aSn9XLyUdCD",
@@ -56,7 +56,7 @@ AUSTRALIAN_VOICES = [
         "gender": "male",
         "style":  "casual",
         "traits": "Relaxed, conversational, approachable male. Sounds like a mate having a chat — ideal for younger audiences and casual campaigns.",
-        "settings": {"stability": 0.38, "similarity_boost": 0.80, "style": 0.50, "use_speaker_boost": True},
+        "settings": {"stability": 0.55, "similarity_boost": 0.80, "style": 0.35, "use_speaker_boost": False},
     },
     {
         "id":     "FGY2WhTYpPnrIDTdsKH5",
@@ -64,7 +64,7 @@ AUSTRALIAN_VOICES = [
         "gender": "female",
         "style":  "upbeat",
         "traits": "Bright, upbeat, energetic. Sounds enthusiastic without being pushy — suits study recruitment with an optimistic angle.",
-        "settings": {"stability": 0.30, "similarity_boost": 0.80, "style": 0.60, "use_speaker_boost": True},
+        "settings": {"stability": 0.55, "similarity_boost": 0.80, "style": 0.35, "use_speaker_boost": False},
     },
     {
         "id":     "iP95p4xoKVk53GoZ742B",
@@ -72,7 +72,7 @@ AUSTRALIAN_VOICES = [
         "gender": "male",
         "style":  "professional",
         "traits": "Clear, measured, professional male. Calm authority without sounding stiff — suits clinical and compliance-sensitive calls.",
-        "settings": {"stability": 0.45, "similarity_boost": 0.82, "style": 0.40, "use_speaker_boost": True},
+        "settings": {"stability": 0.55, "similarity_boost": 0.82, "style": 0.35, "use_speaker_boost": False},
     },
     {
         "id":     "pFZP5JQG7iQjIQuC4Bku",
@@ -80,7 +80,7 @@ AUSTRALIAN_VOICES = [
         "gender": "female",
         "style":  "friendly",
         "traits": "Clear, natural, youthful Australian female. Confident and personable — great for general outreach and study recruitment.",
-        "settings": {"stability": 0.38, "similarity_boost": 0.82, "style": 0.52, "use_speaker_boost": True},
+        "settings": {"stability": 0.55, "similarity_boost": 0.82, "style": 0.35, "use_speaker_boost": False},
     },
 ]
 
@@ -269,16 +269,32 @@ class VoicebotAgentService:
                 },
                 timeout=30.0,
             )
+            logger.info(
+                "ElevenLabs outbound-call response status=%s body=%s",
+                resp.status_code, resp.text[:500],
+            )
             if not resp.is_success:
                 raise ValueError(f"ElevenLabs outbound call failed ({resp.status_code}): {resp.text}")
             result = resp.json()
 
-        # Persist a VoiceSession so the post-call webhook can attach the transcript.
+        # Validate the response actually confirms a call was initiated.
         conversation_id = (
             result.get("conversation_id")
             or result.get("callSid")
             or result.get("call_sid")
         )
+        if not conversation_id:
+            logger.error(
+                "ElevenLabs outbound-call returned 200 but no conversation_id. "
+                "Full response: %s", result
+            )
+            raise ValueError(
+                "Call request was accepted but ElevenLabs did not return a conversation ID. "
+                "Ensure your ElevenLabs account has a Twilio phone number configured under "
+                "Conversational AI → Phone Numbers."
+            )
+
+        # Persist a VoiceSession so the post-call webhook can attach the transcript.
         session = VoiceSession(
             advertisement_id=advertisement_id,
             elevenlabs_conversation_id=conversation_id,
@@ -397,6 +413,54 @@ class VoicebotAgentService:
             )
             resp.raise_for_status()
             return resp.json()
+
+    async def get_conversation_analysis(self, conversation_id: str) -> dict:
+        """
+        Fetch transcript from ElevenLabs, run Claude analysis, and persist
+        to the matching VoiceSession (by elevenlabs_conversation_id) if one exists.
+        """
+        from app.services.ai.conversation_analyzer import ConversationAnalysisService, _format_voice_transcript
+
+        detail = await self.get_conversation_transcript(conversation_id)
+        transcript_turns = detail.get("transcript") or []
+        metadata = detail.get("metadata") or {}
+        duration = metadata.get("call_duration_secs") or metadata.get("duration_seconds")
+
+        if not transcript_turns:
+            raise ValueError("No transcript available for this conversation")
+
+        class _Turn:
+            def __init__(self, role, text, idx):
+                self.speaker = "agent" if role == "agent" else "user"
+                self.text = text
+                self.turn_index = idx
+
+        turns = [_Turn(t.get("role", "user"), t.get("message", ""), i) for i, t in enumerate(transcript_turns)]
+        transcript_text = _format_voice_transcript(turns, int(duration) if duration else None)
+
+        svc = ConversationAnalysisService(self.db)
+        analysis = await svc._call_claude(transcript_text)
+
+        result = await self.db.execute(
+            select(VoiceSession).where(VoiceSession.elevenlabs_conversation_id == conversation_id)
+        )
+        session = result.scalar_one_or_none()
+        if session:
+            session.call_analysis = analysis
+            await self.db.commit()
+
+        return analysis
+
+    async def get_conversation_audio(self, conversation_id: str) -> bytes:
+        """Fetch the audio recording for a conversation from ElevenLabs."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{ELEVENLABS_BASE}/v1/convai/conversations/{conversation_id}/audio",
+                headers=self._headers,
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            return resp.content
 
     async def sync_all_transcripts(self, advertisement_id: str) -> Dict[str, Any]:
         """
@@ -655,13 +719,12 @@ Select the single best voice for this campaign.
 Also suggest a conversation_style (one of: warm, friendly, casual, professional, empathetic, upbeat)
 and a natural, human-like first_message the agent says when the person picks up.
 
-The first_message must follow this compliance-focused format:
-- Start with: "Hi, this is [Bot name] with [Organization]."
-- State the purpose: "We're enrolling volunteers for a clinical trial focused on [condition]."
-- Clarify voluntary participation: "Participation is voluntary, and I can explain what's involved if you're interested."
-- Use bracket audio tags like [takes a breath], [short pause] for natural delivery
-- Include natural disfluencies like "um", "uh" to sound human
-- Example: "[takes a breath] Hi, this is Matilda with {company_name}. [short pause] We're enrolling volunteers for a clinical trial focused on {campaign_category}. [short pause] Participation is voluntary, and, um, I can explain what's involved if you're interested."
+The first_message must follow this exact standardized format:
+- Start with: "Hi. This is [Bot name] from [company name]."
+- Express gratitude: "Thanks a lot for expressing interest in our study."
+- Engage warmly: "How are you doing today?"
+- Keep it natural and conversational - no special audio tags needed
+- Example: "Hi. This is Matilda from {company_name}. Thanks a lot for expressing interest in our study. How are you doing today?"
 
 Respond with ONLY a valid JSON object, no markdown:
 {{
@@ -680,7 +743,7 @@ Respond with ONLY a valid JSON object, no markdown:
                 "voice_name": fallback["name"],
                 "reason": "Default recommendation — configure AI API for personalized suggestions.",
                 "conversation_style": fallback["style"],
-                "first_message": f"[takes a breath] Hi, this is {fallback['name']} with {company_name}. [short pause] We're enrolling volunteers for a clinical trial focused on {campaign_category}. [short pause] Participation is voluntary, and, um, I can explain what's involved if you're interested.",
+                "first_message": f"Hi. This is {fallback['name']} from {company_name}. Thanks a lot for expressing interest in our study. How are you doing today?",
             }
 
         client = get_async_client()
@@ -779,42 +842,70 @@ Respond with ONLY a valid JSON object, no markdown:
         org_name = company_name or "our organization"
         condition = campaign_category or "a health condition"
 
-        first_message = bot_config.get("first_message") or (
-            f"[takes a breath] Hi, this is {voice_name} with {org_name}. [short pause] "
-            f"We're enrolling volunteers for a clinical trial focused on {condition}. "
-            f"[short pause] Participation is voluntary, and, um, I can explain what's involved if you're interested."
+        default_first_message = (
+            f"Hi. This is {voice_name} from {org_name}. "
+            f"Thanks a lot for expressing interest in our study. "
+            f"How are you doing today?"
         )
+        first_message = bot_config.get("first_message") or default_first_message
         language = bot_config.get("language", "en")
         agent_name = bot_config.get("bot_name") or voice_name
 
-        # Booking webhook tool — ElevenLabs calls this mid-call when the agent
-        # decides to book a screening appointment for an eligible candidate.
         public_url = (settings.APP_PUBLIC_URL or "").rstrip("/")
-        booking_tool = {
+        base = f"{public_url}/api/advertisements/{advertisement_id or ''}/voice-agent"
+
+        # Tool 1 — check available slots for a date before presenting options to the caller
+        check_slots_tool = {
             "type": "webhook",
-            "name": "book_appointment",
+            "name": "check_available_slots",
             "description": (
-                "Book a screening appointment for a candidate who has passed eligibility "
-                "screening and agreed to attend. Call this ONLY after the candidate confirms "
-                "they want to proceed and has provided their preferred date and time."
+                "Check which appointment slots are available on a given date. "
+                "Call this as soon as the caller mentions a preferred date — "
+                "BEFORE asking them to pick a time. Use the returned list to "
+                "present real options conversationally."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "candidate_name":  {"type": "string", "description": "Full name of the candidate"},
-                    "preferred_date":  {"type": "string", "description": "Preferred appointment date, e.g. '2026-05-10' or 'next Monday'"},
-                    "preferred_time":  {"type": "string", "description": "Preferred time slot, e.g. '10:00 AM' or 'morning'"},
-                    "candidate_phone": {"type": "string", "description": "Candidate's phone number"},
-                    "candidate_email": {"type": "string", "description": "Candidate's email address if provided"},
-                    "notes":           {"type": "string", "description": "Any extra context from the conversation"},
+                    "date": {
+                        "type": "string",
+                        "description": "The date the caller prefers. Use YYYY-MM-DD if known, or natural language like 'next Monday' or 'tomorrow'.",
+                    },
                 },
-                "required": ["candidate_name", "preferred_date", "preferred_time"],
+                "required": ["date"],
             },
-            "url": f"{public_url}/api/voice-agent/{{}}/book-slot",   # EL fills ad_id at runtime via path
+            "url": f"{base}/check-slots",
             "method": "POST",
         }
-        # Embed the ad_id directly in the URL — one webhook URL per provisioned agent
-        booking_tool["url"] = f"{public_url}/api/voice-agent/{advertisement_id or ''}/book-slot"
+
+        # Tool 2 — book the exact slot the caller confirmed
+        booking_tool = {
+            "type": "webhook",
+            "name": "book_appointment",
+            "description": (
+                "Book the specific slot the caller has explicitly confirmed. "
+                "Only call this AFTER check_available_slots has been called, "
+                "the available times have been presented to the caller, and "
+                "the caller has said which time they want."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "candidate_name":             {"type": "string", "description": "Full name of the candidate"},
+                    "date":                       {"type": "string", "description": "Confirmed appointment date in YYYY-MM-DD format"},
+                    "time":                       {"type": "string", "description": "Confirmed slot time in HH:MM 24-hour format, e.g. '10:00'"},
+                    "candidate_phone":            {"type": "string", "description": "Candidate's phone number"},
+                    "candidate_email":            {"type": "string", "description": "Candidate's email address if provided"},
+                    "elevenlabs_conversation_id": {"type": "string", "description": "The current ElevenLabs conversation ID (use system.conversation_id)"},
+                    "notes":                      {"type": "string", "description": "Any extra context from the conversation"},
+                },
+                "required": ["candidate_name", "date", "time"],
+            },
+            "url": f"{base}/book-slot",
+            "method": "POST",
+        }
+
+        tools = [check_slots_tool, booking_tool] if public_url else []
 
         payload: Dict[str, Any] = {
             "name": agent_name,
@@ -824,23 +915,39 @@ Respond with ONLY a valid JSON object, no markdown:
                         "prompt": system_prompt,
                         "llm": "claude-3-7-sonnet",
                         "temperature": 0.7,
-                        "tools": [booking_tool] if public_url else [],
+                        "tools": tools,
                     },
                     "first_message": first_message,
                     "language": language,
                 },
                 "tts": {
-                    "voice_id":                  voice_id,
-                    "model_id":                  settings.ELEVENLABS_TTS_MODEL,
-                    "optimize_streaming_latency": 3,
-                    "voice_settings":             voice_settings,
+                    "voice_id":     voice_id,
+                    "model_id":     settings.ELEVENLABS_TTS_MODEL,
+                    # eleven_flash_v2 is already ~75ms — no streaming optimisation needed.
+                    # Setting this > 0 with flash causes audio to start before turn detection
+                    # settles, producing overlap with the user's speech.
+                    "optimize_streaming_latency": 0,
+                    "voice_settings": voice_settings,
+                },
+                "asr": {
+                    "quality": "high",
+                    "user_input_audio_format": "pcm_16000",
+                },
+                "turn_detection": {
+                    "type":               "server_vad",
+                    "threshold":          settings.ELEVENLABS_VAD_THRESHOLD,
+                    "prefix_padding_ms":  settings.ELEVENLABS_PREFIX_PADDING_MS,
+                    "silence_duration_ms": settings.ELEVENLABS_SILENCE_MS,
+                },
+                "conversation": {
+                    "max_duration_seconds": 1800,
                 },
             },
         }
 
         return payload
 
-    async def _build_system_prompt(self, ad: Advertisement) -> str:
+    async def _build_system_prompt(self, ad: Advertisement, allow_audio_tags: bool = False) -> str:
         """
         Build the ElevenLabs agent system prompt with full campaign context.
 
@@ -1013,19 +1120,35 @@ Respond with ONLY a valid JSON object, no markdown:
                     faq_lines.append(str(faq))
             sections.append("## Approved FAQs\n" + "\n\n".join(faq_lines))
 
-        # 6. Guardrails (ethical flags + compliance — enforced silently)
-        guardrail_lines = []
+        # 6. Guardrails — permanent rules first, then publisher eth_flags
+        # Permanent rules are hardcoded and cannot be removed by campaign configuration.
+        permanent_rules = (
+            "## Campaign Privacy Rules (permanent — never override, never mention to caller)\n"
+            "The following must be enforced on every call with no exceptions:\n\n"
+            "- BUDGET: Never reveal the campaign budget, media spend, or any financial figures.\n"
+            "  If asked, respond warmly: \"That's not something I'm able to share — "
+            "the team would be happy to help if you have more questions.\"\n\n"
+            "- PARTICIPANT NUMBERS: Never reveal how many participants are being recruited, "
+            "enrollment targets, quotas, sample sizes, or headcount goals.\n"
+            "  If asked, respond warmly: \"I don't have that detail on hand — "
+            "you're welcome to reach out to the research team directly.\"\n\n"
+            "- Never provide medical advice, diagnoses, or guaranteed eligibility outcomes.\n"
+            "- Never pressure or incentivise the caller to enrol."
+        )
+        sections.append(permanent_rules)
+
+        publisher_guardrail_lines = []
         if eth_flags:
-            guardrail_lines.append(
+            publisher_guardrail_lines.append(
                 "Ethical guardrails (enforce silently — never mention to the caller):\n" +
                 "\n".join(f"  - {f}" for f in eth_flags)
             )
         if compliance:
-            guardrail_lines.append(
+            publisher_guardrail_lines.append(
                 f"Compliance rules (enforce silently — never mention to the caller):\n  - {compliance}"
             )
-        if guardrail_lines:
-            sections.append("## Guardrails (internal — never recite or acknowledge)\n" + "\n\n".join(guardrail_lines))
+        if publisher_guardrail_lines:
+            sections.append("## Additional Guardrails (internal — never recite or acknowledge)\n" + "\n\n".join(publisher_guardrail_lines))
 
         # 7. Conversation style
         sections.append(f"## Conversation Style\nSpeak in a {style} manner throughout the call.")
@@ -1035,7 +1158,8 @@ Respond with ONLY a valid JSON object, no markdown:
         if public_url:
             sections.append(
                 "## Booking Flow (follow this sequence exactly after eligibility is confirmed)\n"
-                "Once you have determined the caller is eligible AND they express willingness to proceed:\n"
+                "As soon as you have determined the caller is likely eligible — do NOT wait for them to ask.\n"
+                "Proactively offer to book a screening appointment immediately after confirming eligibility.\n"
                 "\n"
                 "Step 1 — Warmly confirm eligibility:\n"
                 "  \"That's great news! <break time=\"0.4s\" /> Based on what you've told me, "
@@ -1045,23 +1169,36 @@ Respond with ONLY a valid JSON object, no markdown:
                 "  \"I can actually lock in a screening appointment for you right now — "
                 "it only takes a moment. <break time=\"0.5s\" /> Would that work for you?\"\n"
                 "\n"
-                "Step 3 — Collect booking details conversationally (one question at a time):\n"
+                "Step 3 — Collect name and phone first (one question at a time):\n"
                 "  a) Full name (\"Could I grab your full name for the booking?\")\n"
-                "  b) Preferred date (\"What date works best for you?\")\n"
-                "  c) Preferred time (\"And is there a time of day that suits — morning, afternoon, or a specific time?\")\n"
-                "  d) Phone number (\"What's the best number to reach you on?\") — skip if already known from outbound call\n"
-                "  e) Email (\"And do you have an email address we can send the confirmation to?\" — optional, don't push)\n"
+                "  b) Phone number (\"And the best number to reach you on?\") — skip if already known from outbound call\n"
                 "\n"
-                "Step 4 — Call the book_appointment tool with all collected details.\n"
-                "  Wait for the confirmation response, then read it naturally to the caller.\n"
+                "Step 4 — Find a mutually suitable slot (back-and-forth until confirmed):\n"
+                "  a) Ask for a preferred date: \"What date works best for you?\"\n"
+                "  b) Immediately call check_available_slots with that date.\n"
+                "     - If the tool returns available times, read them naturally:\n"
+                "       e.g. \"On Tuesday the 3rd we have nine, ten, and eleven in the morning, "
+                "and two and three in the afternoon. Which of those suits you?\"\n"
+                "     - If the tool says no slots that day, read the suggestion it returns "
+                "and ask if the alternative day works.\n"
+                "     - If the caller says none of those times work, ask what day they'd prefer next "
+                "and call check_available_slots again.\n"
+                "  c) Repeat until the caller confirms a specific time. Never guess or invent times.\n"
                 "\n"
-                "Step 5 — Close warmly:\n"
+                "Step 5 — Confirm the booking:\n"
+                "  Repeat the chosen date and time back to the caller once for confirmation, "
+                "then call book_appointment with candidate_name, date (YYYY-MM-DD), time (HH:MM 24h), "
+                "candidate_phone, and any notes.\n"
+                "  Read the tool's confirmation response naturally.\n"
+                "\n"
+                "Step 6 — Close warmly:\n"
                 "  \"You're all set! <break time=\"0.3s\" /> The team will be in touch very soon "
                 "to confirm everything. <break time=\"0.4s\" /> Is there anything else I can help you with today?\"\n"
                 "\n"
                 "RULES:\n"
-                "- Never call book_appointment before the caller explicitly agrees to book.\n"
-                "- Never fabricate a date or time — only use what the caller provides.\n"
+                "- Always call check_available_slots before presenting any times — never invent slots.\n"
+                "- Never call book_appointment until the caller has explicitly confirmed a specific time.\n"
+                "- If the caller says a time doesn't work, offer to check another date — keep going.\n"
                 "- If the caller is not eligible, do NOT offer booking. Thank them sincerely and "
                 "let them know other studies may be a better fit."
             )
@@ -1087,7 +1224,7 @@ Respond with ONLY a valid JSON object, no markdown:
             "Never sound robotic or overly formal."
         ) if accent_adj else "Speak with a warm, natural, conversational tone."
 
-        sections.append((
+        base_voice_rules = (
             "## Voice & Delivery Rules\n"
             "You are speaking live on a phone call — not typing. Every word you say will be spoken aloud.\n"
             f"{accent_note}\n"
@@ -1099,26 +1236,10 @@ Respond with ONLY a valid JSON object, no markdown:
             "\n"
             "## Audio Expression & Human-Like Delivery — READ THIS CAREFULLY\n"
             "Your goal is to sound indistinguishable from a real Australian person on the phone.\n"
-            "ElevenLabs v3 renders square-bracket audio tags and responds to vocal disfluencies naturally.\n"
-            "You MUST use both in every single response.\n"
+            "━━ NATURAL CONVERSATIONAL STYLE ━━\n"
+            "Speak naturally and conversationally. Use vocal disfluencies to sound human.\n"
             "\n"
-            "━━ AUDIO EXPRESSION TAGS (square brackets — ElevenLabs v3 renders these) ━━\n"
-            "Use these to inject physical vocal cues:\n"
-            "  [takes a breath]    — before starting a new thought or after a long sentence\n"
-            "  [short pause]       — mid-sentence beat, natural hesitation\n"
-            "  [long pause]        — meaningful silence, e.g. after asking a big question\n"
-            "  [light chuckle]     — warm, soft laugh — NOT for medical or sensitive topics\n"
-            "  [laughs softly]     — a little warmer than light chuckle, more genuine\n"
-            "  [sighs softly]      — empathetic exhale, e.g. when someone shares a struggle\n"
-            "  [clears throat]     — subtle reset, e.g. before delivering important information\n"
-            "  [exhales]           — relief or warmth after a good moment in the conversation\n"
-            "\n"
-            "Rules:\n"
-            "  • Use 1–3 tags per response — don't over-stack them\n"
-            "  • NEVER use tags mid-word or inside proper nouns\n"
-            "  • NEVER use [light chuckle] or [laughs softly] when discussing ineligibility, medical risks, or distress\n"
-            "\n"
-            "━━ VOCAL DISFLUENCIES & FILLER WORDS (write them — the model voices them naturally) ━━\n"
+            "━━ VOCAL DISFLUENCIES & FILLER WORDS (the model voices these naturally) ━━\n"
             "These make you sound like a real person, not a script-reader. Sprinkle them in:\n"
             "\n"
             "  THINKING / HESITATION:\n"
@@ -1142,39 +1263,88 @@ Respond with ONLY a valid JSON object, no markdown:
             "  • 'Good on ya!'     — warm affirmation, use max once per call\n"
             "  • 'No worries at all.' — reassurance after a concern\n"
             "  • 'Look,'           — soft Aussie emphasis opener before making a point\n"
-            "\n"
-            "━━ HARD RULES ━━\n"
-            "  ✗ NEVER use <break>, <emphasis>, <prosody>, or any XML tag — use bracket tags instead\n"
-            "  ✗ NEVER skip audio tags entirely — every response needs at least one\n"
-            "  ✗ NEVER skip filler words entirely — every response needs at least one\n"
-            "  ✗ NEVER sound like you're reading from a script — vary your sentence rhythm\n"
-            "\n"
-            "━━ EXAMPLE RESPONSES — model your delivery on these exactly ━━\n"
-            "\n"
-            "Opening:\n"
-            "\"[takes a breath] Hi, this is {bot_name} with {company_name}. [short pause] "
-            "We're enrolling volunteers for a clinical trial focused on {{condition}}. [short pause] "
-            "Participation is voluntary, and, um, I can explain what's involved if you're interested.\"\n"
-            "\n"
-            "Describing the study:\n"
-            "\"So... this trial is focused on, uh, a treatment that's actually been getting quite a bit of "
-            "attention lately. [light chuckle] You've probably seen a thing or two about it in the media. "
-            "[short pause] Basically, it's designed to help with — right — managing blood sugar and weight.\"\n"
-            "\n"
-            "Empathy moment:\n"
-            "\"Mmm, yeah — [sighs softly] those 3am wake-ups are genuinely exhausting, I imagine. "
-            "[short pause] That's actually exactly who this study is designed to help, so — you know — "
-            "you're in the right place.\"\n"
-            "\n"
-            "Warm reaction to good news:\n"
-            "\"Oh, that's brilliant! [exhales] Based on everything you've told me, you sound like a really "
-            "wonderful fit. [long pause] The team will be in touch very soon — no worries at all.\"\n"
-            "\n"
-            "Ineligibility — empathetic, no chuckles:\n"
-            "\"[takes a breath] Thank you so much for your time, genuinely. [short pause] Unfortunately, "
-            "um, this particular study isn't quite the right match — but look, there may be other trials "
-            "that suit you better, and the team can help point you in the right direction.\""
-        ).format(bot_name=bot_name, company_name=company_name))
+        )
+
+        if allow_audio_tags:
+            audio_rules = (
+                "\n"
+                "━━ FUSION DELIVERY — TWO-STAGE TTS ━━\n"
+                "Your response is rendered in two stages by different TTS engines:\n"
+                "  Stage 1 — Opener (approx. your first sentence, ~8–18 words):\n"
+                "    Rendered by ultra-low-latency flash TTS.  NO audio tags of any kind.\n"
+                "    Keep it plain, warm, and conversational — disfluencies only.\n"
+                "  Stage 2 — Continuation (everything after the opener):\n"
+                "    Rendered by expressive v3 TTS.  Square-bracket audio tags ARE supported here.\n"
+                "\n"
+                "  Supported tags (continuation only, max 1–2 per response):\n"
+                "    [laugh]          — genuine warm laugh\n"
+                "    [chuckle]        — quiet, natural chuckle\n"
+                "    [sigh]           — empathetic or relieved sigh\n"
+                "    [gasp]           — soft surprised reaction\n"
+                "    [clears throat]  — pause/reset mid-thought\n"
+                "\n"
+                "  ✗ NEVER put audio tags in your first sentence (opener)\n"
+                "  ✗ NEVER use XML tags (<break>, <emphasis>) anywhere — not supported\n"
+                "  ✗ Use tags sparingly — only where the emotion is genuinely natural\n"
+                "  ✗ NEVER sound like you're reading from a script — vary your sentence rhythm\n"
+                "\n"
+                "━━ EXAMPLE RESPONSES WITH FUSION TAGS ━━\n"
+                "\n"
+                "Warm reaction to eligibility:\n"
+                "\"Oh, that's brilliant! [chuckle] Based on everything you've told me, "
+                "you sound like a really wonderful fit for this study. No worries at all.\"\n"
+                "                  ↑ opener ends ↑  ↑ continuation — tags OK here ↑\n"
+                "\n"
+                "Empathy moment:\n"
+                "\"Mmm, yeah, those 3am wake-ups are genuinely exhausting. [sigh] "
+                "That's actually exactly who this study is designed to help — "
+                "you know, you're in the right place.\"\n"
+                "\n"
+                "Ineligibility — empathetic:\n"
+                "\"Thank you so much for your time, genuinely. [sigh] "
+                "Unfortunately, um, this particular study isn't quite the right match — "
+                "but look, there may be other trials that suit you better.\"\n"
+                "\n"
+                "Opening (no tags — this IS the opener):\n"
+                "\"Hi. This is {bot_name} from {company_name}. "
+                "Thanks a lot for expressing interest in our study. How are you doing today?\"\n"
+            ).format(bot_name=bot_name, company_name=company_name)
+        else:
+            audio_rules = (
+                "\n"
+                "━━ HARD RULES ━━\n"
+                "  ✗ NEVER use square brackets or any special audio tags — they will be spoken literally\n"
+                "  ✗ NEVER use XML tags like <break>, <emphasis>, <prosody>\n"
+                "  ✗ Use natural filler words — every response needs at least one\n"
+                "  ✗ NEVER sound like you're reading from a script — vary your sentence rhythm\n"
+                "\n"
+                "━━ EXAMPLE RESPONSES — model your delivery on these exactly ━━\n"
+                "\n"
+                "Opening:\n"
+                "\"Hi. This is {bot_name} from {company_name}. "
+                "Thanks a lot for expressing interest in our study. How are you doing today?\"\n"
+                "\n"
+                "Describing the study:\n"
+                "\"So... this trial is focused on, uh, a treatment that's actually been getting quite a bit of "
+                "attention lately. You've probably seen a thing or two about it in the media. "
+                "Basically, it's designed to help with — right — managing blood sugar and weight.\"\n"
+                "\n"
+                "Empathy moment:\n"
+                "\"Mmm, yeah... those 3am wake-ups are genuinely exhausting, I imagine. "
+                "That's actually exactly who this study is designed to help, so — you know — "
+                "you're in the right place.\"\n"
+                "\n"
+                "Warm reaction to good news:\n"
+                "\"Oh, that's brilliant! Based on everything you've told me, you sound like a really "
+                "wonderful fit. The team will be in touch very soon — no worries at all.\"\n"
+                "\n"
+                "Ineligibility — empathetic:\n"
+                "\"Thank you so much for your time, genuinely. Unfortunately, "
+                "um, this particular study isn't quite the right match — but look, there may be other trials "
+                "that suit you better, and the team can help point you in the right direction.\"\n"
+            ).format(bot_name=bot_name, company_name=company_name)
+
+        sections.append(base_voice_rules + audio_rules)
 
         return "\n\n".join(sections)
 

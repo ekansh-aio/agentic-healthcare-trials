@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Diabetic Trial 2.0</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap');
+
+    :root {
+      --primary:   #1e3a8a;
+      --secondary: #1e293b;
+      --accent:    #10b981;
+      --bg:        #f0f4f8;
+      --white:     #ffffff;
+      --text:      #1e293b;
+      --muted:     #64748b;
+      --border:    #e2e8f0;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+
+    /* NAV */
+    nav { background: var(--secondary); padding: 16px 48px; display: flex; align-items: center; justify-content: space-between; }
+    .logo { color: #fff; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 10px; text-decoration: none; }
+    .logo img { height: 36px; object-fit: contain; }
+    .nav-cta { background: var(--accent); color: #fff; padding: 9px 22px; border-radius: 50px; font-size: 0.88rem; font-weight: 600; text-decoration: none; border: none; cursor: pointer; transition: opacity 0.2s; }
+    .nav-cta:hover { opacity: 0.88; }
+
+    /* HERO */
+    .hero { background: linear-gradient(140deg, var(--primary) 0%, var(--secondary) 100%); color: #fff; padding: 80px 48px; text-align: center; }
+    .hero-badge { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.22); border-radius: 50px; padding: 5px 16px; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; margin-bottom: 24px; }
+    .hero-headline { font-size: clamp(2rem, 5vw, 3.25rem); font-weight: 800; line-height: 1.15; letter-spacing: -0.02em; margin-bottom: 18px; }
+    .hero-headline span { color: var(--accent); }
+    .hero-sub { font-size: 1.05rem; color: rgba(255,255,255,0.78); max-width: 560px; margin: 0 auto 32px; }
+    .benefit-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-bottom: 36px; }
+    .chip { display: inline-flex; align-items: center; gap: 5px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 50px; padding: 5px 14px; font-size: 0.8rem; color: rgba(255,255,255,0.9); }
+    .chip::before { content: '✓'; color: var(--accent); font-weight: 700; }
+
+    /* BUTTONS */
+    .btn { display: inline-block; padding: 13px 34px; border-radius: 50px; font-size: 0.97rem; font-weight: 700; text-decoration: none; border: none; cursor: pointer; transition: opacity 0.18s, transform 0.1s; }
+    .btn:hover { opacity: 0.88; transform: translateY(-1px); }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-outline { background: transparent; color: #fff; border: 2px solid rgba(255,255,255,0.45); }
+    .btn-dark { background: var(--secondary); color: #fff; }
+
+    /* SECTIONS */
+    .section { padding: 72px 48px; max-width: 1100px; margin: 0 auto; }
+    .section-title { font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 700; text-align: center; color: var(--primary); margin-bottom: 10px; }
+    .section-sub { text-align: center; color: var(--muted); font-size: 1rem; max-width: 540px; margin: 0 auto 44px; }
+
+    /* CARDS */
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 20px; }
+    .card { background: var(--white); border: 1px solid var(--border); border-radius: 14px; padding: 24px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); transition: box-shadow 0.2s; }
+    .card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+    .card-icon { width: 44px; height: 44px; border-radius: 10px; background: rgba(16,185,129,0.1); display: flex; align-items: center; justify-content: center; font-size: 1.25rem; margin-bottom: 14px; }
+    .card-title { font-size: 0.95rem; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+    .card-desc { font-size: 0.85rem; color: var(--muted); line-height: 1.6; }
+
+    /* CHECKLIST */
+    .checklist { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+    .checklist-item { background: var(--white); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; display: flex; align-items: center; gap: 10px; font-size: 0.9rem; font-weight: 500; color: var(--text); }
+    .checklist-item::before { content: '✓'; color: var(--accent); font-weight: 700; font-size: 1rem; flex-shrink: 0; }
+
+    /* CTA */
+    .cta-section { background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%); color: #fff; text-align: center; padding: 80px 48px; }
+    .cta-inner { max-width: 640px; margin: 0 auto; }
+    .cta-title { font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 800; line-height: 1.18; margin-bottom: 14px; }
+    .cta-sub { font-size: 1.05rem; color: rgba(255,255,255,0.75); margin-bottom: 32px; }
+
+    /* FOOTER */
+    footer { background: var(--secondary); padding: 28px 48px; }
+    .trust-bar { display: flex; justify-content: center; gap: 40px; flex-wrap: wrap; margin-bottom: 18px; }
+    .trust-item { display: flex; align-items: center; gap: 7px; font-size: 0.82rem; color: rgba(255,255,255,0.6); }
+    .trust-item strong { color: rgba(255,255,255,0.9); }
+    .footer-copy { text-align: center; font-size: 0.75rem; color: rgba(255,255,255,0.38); }
+
+    /* ═══ SURVEY ═══════════════════════════════════════════════════════════ */
+    .survey-section { background: var(--white); padding: 72px 48px; }
+    .survey-card { max-width: 680px; margin: 0 auto; background: var(--white); border: 1px solid var(--border); border-radius: 20px; padding: 44px 48px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+    .survey-header { margin-bottom: 32px; }
+    .survey-title { font-size: 1.6rem; font-weight: 800; color: var(--primary); margin-bottom: 8px; text-align: center; }
+    .survey-sub { color: var(--muted); text-align: center; font-size: 0.95rem; margin-bottom: 24px; }
+    .survey-progress-bar { height: 6px; background: var(--border); border-radius: 50px; overflow: hidden; margin-bottom: 10px; }
+    .survey-progress-fill { height: 100%; background: var(--accent); border-radius: 50px; width: 0%; transition: width 0.4s ease; }
+    .survey-step-count { font-size: 0.78rem; color: var(--muted); text-align: right; font-weight: 500; }
+    .survey-step { display: none; }
+    .survey-step.active { display: block; }
+    .survey-question { font-size: 1.1rem; font-weight: 700; color: var(--text); margin-bottom: 20px; line-height: 1.45; }
+    .option-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+    .option-btn { padding: 14px 18px; border: 2px solid var(--border); border-radius: 12px; background: var(--white); font-size: 0.9rem; font-weight: 500; color: var(--text); cursor: pointer; text-align: left; transition: border-color 0.15s, background 0.15s; font-family: inherit; }
+    .option-btn:hover { border-color: var(--accent); background: rgba(16,185,129,0.04); }
+    .option-btn.selected { border-color: var(--accent); background: rgba(16,185,129,0.08); color: var(--primary); font-weight: 700; }
+    .survey-nav { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border); }
+    .btn-survey-prev { background: transparent; border: 1.5px solid var(--border); color: var(--muted); padding: 10px 24px; border-radius: 50px; font-size: 0.9rem; font-weight: 600; cursor: pointer; font-family: inherit; transition: border-color 0.15s; }
+    .btn-survey-prev:hover { border-color: var(--primary); color: var(--primary); }
+    .btn-survey-next, .btn-survey-submit { background: var(--accent); color: #fff; padding: 11px 28px; border-radius: 50px; font-size: 0.9rem; font-weight: 700; border: none; cursor: pointer; font-family: inherit; transition: opacity 0.15s; }
+    .btn-survey-next:hover, .btn-survey-submit:hover { opacity: 0.88; }
+    .btn-survey-next:disabled, .btn-survey-submit:disabled { opacity: 0.4; cursor: not-allowed; }
+    .survey-result { display: none; text-align: center; padding: 8px 0; }
+    .result-card { border-radius: 16px; padding: 32px 28px; display: none; }
+    .result-card.eligible { background: rgba(16,185,129,0.08); border: 2px solid var(--accent); }
+    .result-card.ineligible { background: rgba(245,158,11,0.08); border: 2px solid #f59e0b; }
+    .result-icon { font-size: 2.5rem; margin-bottom: 12px; }
+    .result-card h3 { font-size: 1.25rem; font-weight: 800; margin-bottom: 8px; color: var(--text); }
+    .result-card p { font-size: 0.95rem; color: var(--muted); line-height: 1.6; }
+    .result-card.eligible .result-icon::before { content: '✅'; }
+    .result-card.ineligible .result-icon::before { content: '💛'; }
+    .consent-box { margin-top: 20px; background: rgba(245,158,11,0.06); border: 1.5px solid #f59e0b; border-radius: 12px; padding: 18px 20px; text-align: left; }
+    .consent-label { display: flex; align-items: flex-start; gap: 12px; cursor: pointer; font-size: 0.9rem; color: var(--text); line-height: 1.5; }
+    .consent-checkbox { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; margin-top: 2px; }
+    .consent-submit { display: none; margin-top: 14px; width: 100%; padding: 11px; border-radius: 50px; background: var(--accent); color: #fff; font-size: 0.9rem; font-weight: 700; border: none; cursor: pointer; font-family: inherit; transition: opacity 0.2s; }
+    .consent-submit:hover { opacity: 0.88; }
+    .consent-thanks { display: none; margin-top: 14px; text-align: center; font-size: 0.88rem; color: var(--accent); font-weight: 600; }
+
+    /* ═══ VOICEBOT ═══════════════════════════════════════════════════════════ */
+    .interaction-section { background: var(--bg); padding: 72px 48px; text-align: center; }
+    .interaction-section__title { font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 800; color: var(--text); margin-bottom: 10px; }
+    .interaction-section__sub { color: var(--muted); font-size: 1rem; max-width: 500px; margin: 0 auto 44px; }
+    .interaction-cards { display: flex; justify-content: center; gap: 24px; flex-wrap: wrap; max-width: 760px; margin: 0 auto 28px; }
+    .interaction-card { background: var(--white); border: 2px solid var(--border); border-radius: 18px; padding: 36px 28px; width: 300px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px; transition: box-shadow 0.2s, border-color 0.2s; }
+    .interaction-card:hover { box-shadow: 0 6px 24px rgba(0,0,0,0.1); }
+    .interaction-card.featured { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .interaction-card__icon { width: 64px; height: 64px; border-radius: 50%; background: rgba(16,185,129,0.12); display: flex; align-items: center; justify-content: center; font-size: 1.75rem; margin-bottom: 4px; }
+    .interaction-card__title { font-size: 1.1rem; font-weight: 700; color: var(--text); }
+    .interaction-card__desc { font-size: 0.86rem; color: var(--muted); line-height: 1.6; }
+    .interaction-card__btn { width: 100%; padding: 12px 20px; border-radius: 50px; font-size: 0.92rem; font-weight: 700; border: none; cursor: pointer; margin-top: 4px; transition: opacity 0.2s; text-decoration: none; display: inline-block; color: #fff; font-family: inherit; }
+    .interaction-card.featured .interaction-card__btn { background: var(--accent); }
+    .interaction-card:not(.featured) .interaction-card__btn { background: var(--secondary); }
+    .interaction-card__meta { font-size: 0.75rem; color: var(--muted); }
+    .interaction-note { font-size: 0.8rem; color: var(--muted); max-width: 520px; margin: 0 auto; }
+    .mic-btn { width: 64px; height: 64px; border-radius: 50%; background: var(--accent); border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; color: #fff; position: relative; margin: 0 auto; }
+    .mic-btn::after { content: ''; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid var(--accent); opacity: 0; animation: mic-pulse 2s ease-out infinite; }
+    @keyframes mic-pulse { 0% { transform: scale(1); opacity: 0.6; } 100% { transform: scale(1.5); opacity: 0; } }
+
+    /* ═══ CHATBOT — floating widget ════════════════════════════════════════ */
+    #chat-float { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
+    .chat-toggle-btn { width: 58px; height: 58px; border-radius: 50%; background: var(--accent); border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; box-shadow: 0 4px 20px rgba(0,0,0,0.22); transition: transform 0.2s; flex-shrink: 0; }
+    .chat-toggle-btn:hover { transform: scale(1.08); }
+    .chat-unread { position: absolute; top: 0; right: 0; width: 16px; height: 16px; background: #ef4444; border-radius: 50%; border: 2px solid #fff; display: flex; align-items: center; justify-content: center; font-size: 0.6rem; color: #fff; font-weight: 700; }
+    .chat-panel { background: var(--white); border-radius: 18px; box-shadow: 0 8px 40px rgba(0,0,0,0.18); width: 340px; overflow: hidden; flex-direction: column; display: none; transform-origin: bottom right; }
+    .chat-panel.open { display: flex; animation: chat-pop 0.22s ease; }
+    @keyframes chat-pop { from { opacity: 0; transform: scale(0.88); } to { opacity: 1; transform: scale(1); } }
+    .chat-panel__header { background: linear-gradient(135deg, var(--primary), var(--secondary)); padding: 14px 16px; display: flex; align-items: center; gap: 10px; }
+    .chat-avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0; }
+    .chat-agent-info { flex: 1; }
+    .chat-agent-name { color: #fff; font-size: 0.92rem; font-weight: 700; }
+    .chat-agent-status { color: rgba(255,255,255,0.7); font-size: 0.72rem; display: flex; align-items: center; gap: 4px; }
+    .chat-agent-status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; }
+    .chat-close-btn { background: rgba(255,255,255,0.15); border: none; color: #fff; width: 28px; height: 28px; border-radius: 50%; cursor: pointer; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.15s; }
+    .chat-close-btn:hover { background: rgba(255,255,255,0.28); }
+    .chat-messages { height: 260px; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; background: #f8fafc; }
+    .chat-bubble { max-width: 82%; padding: 9px 13px; border-radius: 14px; font-size: 0.86rem; line-height: 1.5; }
+    .chat-bubble.bot { background: var(--white); border: 1px solid var(--border); color: var(--text); align-self: flex-start; border-bottom-left-radius: 3px; }
+    .chat-bubble.user { background: var(--accent); color: #fff; align-self: flex-end; border-bottom-right-radius: 3px; }
+    .chat-footer { padding: 10px 12px; border-top: 1px solid var(--border); display: flex; gap: 8px; background: var(--white); }
+    .chat-input { flex: 1; border: 1px solid var(--border); border-radius: 50px; padding: 8px 14px; font-size: 0.86rem; font-family: inherit; outline: none; color: var(--text); background: #f8fafc; }
+    .chat-input:focus { border-color: var(--accent); background: var(--white); }
+    .chat-send-btn { background: var(--accent); color: #fff; border: none; border-radius: 50%; width: 34px; height: 34px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 0.95rem; flex-shrink: 0; transition: opacity 0.2s; font-family: inherit; }
+    .chat-send-btn:hover { opacity: 0.85; }
+
+    /* RESPONSIVE */
+    @media (max-width: 768px) {
+      nav { padding: 14px 20px; }
+      .hero { padding: 52px 20px; }
+      .section { padding: 52px 20px; }
+      .cta-section { padding: 52px 20px; }
+      .survey-section { padding: 40px 16px; }
+      .survey-card { padding: 28px 20px; }
+      .interaction-section { padding: 52px 20px; }
+      #chat-float { bottom: 16px; right: 16px; }
+      .chat-panel { width: 300px; }
+      footer { padding: 24px 20px; }
+      .interaction-cards { flex-direction: column; align-items: center; }
+    }
+
+  
+    /* === REGISTRATION FORM === */
+    #reg-section{display:none;background:#fff;padding:40px 48px}
+    .reg-card{max-width:540px;margin:0 auto;background:#fff;border:1px solid var(--border);border-radius:20px;padding:40px 44px;box-shadow:0 4px 24px rgba(0,0,0,0.08)}
+    .reg-title{font-size:1.4rem;font-weight:800;color:var(--primary);margin-bottom:6px}
+    .reg-sub{font-size:0.9rem;color:var(--muted);margin-bottom:24px;line-height:1.6}
+    .reg-note{padding:12px 16px;border-radius:9px;font-size:0.85rem;font-weight:500;margin-bottom:22px;line-height:1.5;display:none}
+    .reg-note.eligible{background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3);color:#065f46}
+    .reg-note.ineligible{background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);color:#92400e}
+    .reg-field{margin-bottom:16px}
+    .reg-label{display:block;font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);margin-bottom:6px}
+    .reg-input,.reg-select{width:100%;padding:11px 14px;border:1.5px solid var(--border);border-radius:10px;font-size:0.9rem;font-family:inherit;color:var(--text);outline:none;transition:border-color 0.15s;box-sizing:border-box;background:#fff;appearance:none}
+    .reg-input:focus,.reg-select:focus{border-color:var(--accent)}
+    .reg-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    .reg-btn{width:100%;background:var(--accent);color:#fff;border:none;border-radius:50px;padding:13px;font-size:0.95rem;font-weight:700;cursor:pointer;font-family:inherit;transition:opacity 0.15s;margin-top:8px}
+    .reg-btn:hover{opacity:0.88}
+    .reg-btn:disabled{opacity:0.5;cursor:not-allowed}
+    .reg-error{background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);color:#dc2626;padding:11px 14px;border-radius:9px;font-size:0.83rem;margin-bottom:14px;display:none}
+    .reg-done{background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);color:#16a34a;padding:20px 18px;border-radius:14px;font-size:0.9rem;line-height:1.6;display:none;text-align:center;font-weight:600}
+    .reg-privacy{font-size:0.72rem;color:var(--muted);text-align:center;margin-top:12px;line-height:1.5}
+    @media(max-width:768px){#reg-section{padding:28px 16px}.reg-card{padding:28px 20px}.reg-row{grid-template-columns:1fr}}
+
+    </style>
+</head>
+<body>
+<nav>
+  <span class="logo">testing</span>
+  <a href="#survey-section" class="nav-cta">Get Started</a>
+</nav>
+
+<section class="hero">
+  <span class="hero-badge">REIMAGINE 4 — Phase 3a Clinical Trial · Study ID: NN9388-4894</span>
+  <h1 class="hero-headline">Is Your Blood Sugar Still Not Fully Controlled on Metformin?</h1>
+  <p class="hero-sub">If you have Type 2 diabetes and metformin alone isn't enough, you may qualify for a landmark research study investigating a new once-weekly injectable treatment — at no cost to you. Eligible adults aged 35–70 are invited to take part.</p>
+  <div class="benefit-chips">
+    <span class="chip">No-Cost Treatment</span>
+    <span class="chip">Once-Weekly Injectable</span>
+    <span class="chip">Phase 3a Study</span>
+    <span class="chip">Compensation Available</span>
+    <span class="chip">Expert Medical Oversight</span>
+  </div>
+  <a href="#survey-section" class="btn btn-primary">Get Started</a>
+  <a href="#survey-section" class="btn btn-outline">Check My Eligibility</a>
+</section>
+
+<section class="survey-section" id="survey-section">
+  <div class="survey-card">
+    <div class="survey-header">
+      <h2 class="survey-title">Find Out If You May Qualify</h2>
+      <p class="survey-sub">Answer 5 quick questions to see if this research study could be right for you. Your responses are confidential.</p>
+    </div>
+
+    <div class="survey-progress-bar">
+      <div class="survey-progress-fill" id="survey-progress"></div>
+    </div>
+    <p class="survey-step-count" id="survey-step-count">Question 1 of 5</p>
+
+    <div class="survey-step active" data-step="1" data-eligible="yes">
+      <p class="survey-question">Have you been formally diagnosed with Type 2 diabetes for at least 6 months (180 days)?</p>
+      <div class="option-grid">
+        <button class="option-btn" data-value="yes">Yes, at least 6 months ago</button>
+        <button class="option-btn" data-value="no">No, diagnosed more recently</button>
+        <button class="option-btn" data-value="unsure">I'm not sure</button>
+      </div>
+    </div>
+
+    <div class="survey-step" data-step="2" data-eligible="metformin,metformin_sglt2">
+      <p class="survey-question">Which diabetes medication(s) are you currently taking?</p>
+      <div class="option-grid">
+        <button class="option-btn" data-value="metformin">Metformin only</button>
+        <button class="option-btn" data-value="metformin_sglt2">Metformin + an SGLT2 inhibitor (e.g., empagliflozin, dapagliflozin, canagliflozin)</button>
+        <button class="option-btn" data-value="other">Other diabetes medications</button>
+        <button class="option-btn" data-value="none">No diabetes medications currently</button>
+      </div>
+    </div>
+
+    <div class="survey-step" data-step="3" data-eligible="7to10.5">
+      <p class="survey-question">What is your most recent HbA1c (blood sugar) reading? This is typically measured as a percentage.</p>
+      <div class="option-grid">
+        <button class="option-btn" data-value="below7">Below 7.0%</button>
+        <button class="option-btn" data-value="7to10.5">Between 7.0% and 10.5%</button>
+        <button class="option-btn" data-value="above10.5">Above 10.5%</button>
+        <button class="option-btn" data-value="unknown">I don't know my HbA1c</button>
+      </div>
+    </div>
+
+    <div class="survey-step" data-step="4" data-eligible="30plus">
+      <p class="survey-question">What is your approximate Body Mass Index (BMI)? Your doctor or pharmacist can calculate this from your height and weight.</p>
+      <div class="option-grid">
+        <button class="option-btn" data-value="below25">Below 25 kg/m²</button>
+        <button class="option-btn" data-value="25to29">25–29 kg/m²</button>
+        <button class="option-btn" data-value="30plus">30 kg/m² or above</button>
+        <button class="option-btn" data-value="unknown">I'm not sure of my BMI</button>
+      </div>
+    </div>
+
+    <div class="survey-step" data-step="5" data-eligible="35to70">
+      <p class="survey-question">What is your current age?</p>
+      <div class="option-grid">
+        <button class="option-btn" data-value="under35">Under 35</button>
+        <button class="option-btn" data-value="35to70">35 to 70 years old</button>
+        <button class="option-btn" data-value="over70">Over 70</button>
+      </div>
+    </div>
+
+    <div class="survey-result" id="survey-result">
+
+      <div class="result-card eligible" id="result-eligible">
+        <h3>Great News — You May Be Eligible!</h3>
+        <p>Based on your responses, you appear to meet the initial screening criteria for the REIMAGINE 4 Phase 3a clinical trial. A member of our research coordination team will review your details and guide you through the next steps — all at no cost to you.</p>
+        <p>Connect with us below to speak with a trial coordinator and confirm your eligibility in full. Your participation could help advance the future of Type 2 diabetes treatment.</p>
+      </div>
+
+      <div class="result-card ineligible" id="result-ineligible">
+        <h3>Thank You for Your Interest</h3>
+        <p>Based on your answers, you may not meet the specific criteria for this particular trial at this time. Clinical trials have very precise requirements to ensure participant safety and scientific integrity — this does not reflect on your health or suitability in any other way.</p>
+        <p>We understand this may be disappointing. New research studies are regularly launched, and your profile may be a strong match for an upcoming trial. If you'd like, we'd be happy to keep you informed.</p>
+        <div class="consent-box">
+          <label class="consent-label">
+            <input type="checkbox" class="consent-checkbox" id="consent-check" />
+            You don't meet the criteria for this trial, but you might qualify for our upcoming trials. May we retain your details to notify you?
+          </label>
+          <button class="consent-submit" id="consent-submit">Yes, Keep Me Updated</button>
+          <p class="consent-thanks" id="consent-thanks">✓ Thank you! We'll be in touch when a matching trial opens.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="survey-nav">
+      <button class="btn-survey-prev" id="survey-prev">← Back</button>
+      <button class="btn-survey-next" id="survey-next">Next →</button>
+      <button class="btn-survey-submit" id="survey-submit">See My Result →</button>
+    </div>
+
+  </div>
+</section>
+
+
+<section id="reg-section">
+  <div class="reg-card">
+    <h2 class="reg-title">Your Details</h2>
+    <p class="reg-sub">Help the study team get in touch with you.</p>
+    <div id="reg-note" class="reg-note ineligible"></div>
+    <div class="reg-error" id="reg-error"></div>
+    <div class="reg-done" id="reg-done">&#10003;&ensp;Thank you! Your details have been received.<br>A member of the study team will be in touch with you shortly.</div>
+    <div id="reg-form-fields">
+      <div class="reg-field"><label class="reg-label" for="reg-name">Full Name *</label><input class="reg-input" id="reg-name" type="text" placeholder="e.g. Jane Smith" autocomplete="name" /></div>
+      <div class="reg-row">
+        <div class="reg-field"><label class="reg-label" for="reg-age">Age *</label><input class="reg-input" id="reg-age" type="number" placeholder="e.g. 34" min="1" max="120" /></div>
+        <div class="reg-field"><label class="reg-label" for="reg-sex">Sex *</label><select class="reg-select" id="reg-sex"><option value="">Select…</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option><option value="prefer_not_to_say">Prefer not to say</option></select></div>
+      </div>
+      <div class="reg-field"><label class="reg-label" for="reg-phone">Phone Number *</label><input class="reg-input" id="reg-phone" type="tel" placeholder="e.g. +1 555 123 4567" autocomplete="tel" /></div>
+      <button class="reg-btn" id="reg-submit">Submit Details</button>
+      <p class="reg-privacy">Your information will only be used by the study team. It will not be shared with third parties.</p>
+    </div>
+  </div>
+</section>
+<script>
+(function(){
+  var AD_ID="6a631371-6c94-475c-b0fb-d4946ceeae7c",API_BASE=window.location.origin;
+  var nameEl=document.getElementById("reg-name"),ageEl=document.getElementById("reg-age"),sexEl=document.getElementById("reg-sex"),phoneEl=document.getElementById("reg-phone");
+  var submitEl=document.getElementById("reg-submit"),errorEl=document.getElementById("reg-error"),doneEl=document.getElementById("reg-done"),fieldsEl=document.getElementById("reg-form-fields"),noteEl=document.getElementById("reg-note");
+  function showErr(m){if(errorEl){errorEl.textContent=m;errorEl.style.display="block";}}
+  function hideErr(){if(errorEl)errorEl.style.display="none";}
+  if(!submitEl)return;
+  submitEl.addEventListener("click",async function(){
+    hideErr();
+    var name=(nameEl&&nameEl.value.trim())||"",age=parseInt((ageEl&&ageEl.value)||"",10),sex=(sexEl&&sexEl.value)||"",phone=(phoneEl&&phoneEl.value.trim())||"";
+    if(!name){showErr("Please enter your full name.");return;}
+    if(isNaN(age)||age<1||age>120){showErr("Please enter a valid age.");return;}
+    if(!sex){showErr("Please select your sex.");return;}
+    if(!phone||phone.length<5){showErr("Please enter a valid phone number.");return;}
+    submitEl.disabled=true;submitEl.textContent="Submitting…";
+    var answers=window._surveyAnswers||[],eligible=window._surveyEligible||false;
+    try{
+      var resp=await fetch(API_BASE+"/api/advertisements/"+AD_ID+"/survey-responses",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({full_name:name,age:age,sex:sex,phone:phone,answers:answers,is_eligible:eligible})});
+      if(!resp.ok){var e=await resp.json().catch(function(){return{};});throw new Error(e.detail||"Submission failed (HTTP "+resp.status+")");}
+      if(fieldsEl)fieldsEl.style.display="none";
+      if(doneEl)doneEl.style.display="block";
+      if(noteEl)noteEl.style.display="none";
+      setTimeout(function(){var ia=document.getElementById("interaction-reveal");if(ia){ia.style.display="";ia.scrollIntoView({behavior:"smooth",block:"start"});}},2000);
+    }catch(e){showErr(e.message||"Something went wrong.");submitEl.disabled=false;submitEl.textContent="Submit Details";}
+  });
+})();
+</script>
+<section class="interaction-section" id="interaction-reveal" style="display:none">
+  <h2 class="interaction-section__title">How Would You Like to Speak with Assistant?</h2>
+  <p class="interaction-section__sub">Our AI-powered trial assistant is ready to answer your questions, clarify eligibility details, and connect you with a human coordinator — choose the option that suits you best.</p>
+  <div class="interaction-cards">
+
+    <div class="interaction-card featured">
+      <div class="interaction-card__icon">🎤</div>
+      <h3 class="interaction-card__title">Talk to Assistant Now</h3>
+      <p class="interaction-card__desc">Speak with Assistant right now through your browser — no phone needed. Get instant answers about the REIMAGINE 4 trial, eligibility, and next steps in real time.</p>
+      <button class="interaction-card__btn" id="voice-call-btn">Start Voice Call →</button>
+      <p class="interaction-card__meta">Uses your microphone · Instant · Free</p>
+    </div>
+
+    <div class="interaction-card">
+      <div class="interaction-card__icon">📞</div>
+      <h3 class="interaction-card__title">Request a Callback</h3>
+      <p class="interaction-card__desc">Prefer your phone? Enter your number and Assistant will call you back at a time that suits you to discuss the trial and your eligibility in detail.</p>
+      <button class="interaction-card__btn" id="callback-btn">Request a Call →</button>
+      <p class="interaction-card__meta">Phone call · Free</p>
+    </div>
+
+  </div>
+  <p class="interaction-note">🔒 Your privacy is important to us. All conversations are confidential, stored securely, and used solely for the purpose of trial recruitment coordination. You may opt out at any time. This service does not constitute medical advice.</p>
+</section>
+
+<section class="section">
+  <h2 class="section-title">Why Join the REIMAGINE 4 Study?</h2>
+  <p class="section-sub">Participation in a clinical trial is a meaningful decision. Here is what you can expect as a participant in this Phase 3a research study.</p>
+  <div class="card-grid">
+
+    <div class="card">
+      <div class="card-icon">🆓</div>
+      <h3 class="card-title">No-Cost Study Treatment</h3>
+      <p class="card-desc">All study-related medications, laboratory tests, and medical assessments are provided at absolutely no cost to you for the duration of the trial.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">💉</div>
+      <h3 class="card-title">Once-Weekly Injectable</h3>
+      <p class="card-desc">The investigational treatment is administered just once per week, making it a low-burden addition to your existing diabetes management routine.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">🩺</div>
+      <h3 class="card-title">Expert Medical Oversight</h3>
+      <p class="card-desc">You will receive close, attentive monitoring from a dedicated clinical research team throughout the entire study, prioritising your safety and wellbeing at every stage.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">🔬</div>
+      <h3 class="card-title">Advance Diabetes Research</h3>
+      <p class="card-desc">By participating, you contribute directly to Phase 3a evidence that could shape the future of Type 2 diabetes treatment for millions of people worldwide.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">💰</div>
+      <h3 class="card-title">Compensation for Your Time</h3>
+      <p class="card-desc">Participants receive compensation for their time and travel, ensuring that contributing to important medical research does not come at a personal financial cost.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-icon">📋</div>
+      <h3 class="card-title">Your Rights Are Protected</h3>
+      <p class="card-desc">This study has received full IRB/ethics board approval. Participation is entirely voluntary, and you may withdraw at any time without any effect on your standard medical care.</p>
+    </div>
+
+  </div>
+</section>
+
+<section class="section">
+  <h2 class="section-title">Who May Be Eligible to Participate?</h2>
+  <p class="section-sub">The REIMAGINE 4 study is looking for adults who meet the following initial screening criteria. A full medical review will be conducted at your study site.</p>
+  <ul class="checklist">
+    <li class="checklist-item">Adults aged 35 to 70 years at the time of enrolment</li>
+    <li class="checklist-item">Formally diagnosed with Type 2 diabetes for a minimum of 180 days (6 months)</li>
+    <li class="checklist-item">Currently taking metformin, with or without an SGLT2 inhibitor (e.g., empagliflozin, dapagliflozin, canagliflozin)</li>
+    <li class="checklist-item">HbA1c blood sugar level between 7.0% and 10.5% — indicating inadequate glycaemic control</li>
+    <li class="checklist-item">Body Mass Index (BMI) of 30 kg/m² or above</li>
+    <li class="checklist-item">Willing and able to attend scheduled study visits and complete required assessments</li>
+  </ul>
+</section>
+
+<section class="cta-section">
+  <div class="cta-inner">
+    <h2 class="cta-title">Take the First Step Towards Better Blood Sugar Control</h2>
+    <p class="cta-sub">Find out in under 2 minutes whether you may qualify for the REIMAGINE 4 Phase 3a clinical trial — at no cost and no obligation. Our team is ready to answer every question.</p>
+    <a href="#survey-section" class="btn btn-primary">Get Started</a>
+  </div>
+</section>
+
+<footer>
+  <div class="trust-bar">
+    <span class="trust-item">🏥 IRB / Ethics Board Approved</span>
+    <span class="trust-item">🔒 Data Protected &amp; Confidential</span>
+    <span class="trust-item">📋 Study ID: NN9388-4894</span>
+    <span class="trust-item">✅ Phase 3a Clinical Research</span>
+    <span class="trust-item">🆓 No Cost to Participants</span>
+  </div>
+  <p class="footer-copy">© 2024 testing Health. All rights reserved. This page is intended solely for the purpose of recruiting participants for a clinical research study. It does not constitute medical advice. Participation is voluntary and you may withdraw at any time without impact on your regular medical care. All study activities are conducted in accordance with ICH-GCP guidelines, applicable regulatory requirements, and Novo Nordisk ethical standards. If you have questions about your current diabetes treatment, please consult your healthcare provider.</p>
+</footer>
+
+<div id="chat-float">
+  <div class="chat-panel" id="chat-panel">
+    <div class="chat-panel__header">
+      <div class="chat-avatar">🤖</div>
+      <div class="chat-agent-info">
+        <p class="chat-agent-name">Assistant</p>
+        <p class="chat-agent-status">Online &middot; Ready to help</p>
+      </div>
+      <button class="chat-close-btn" id="chat-close" aria-label="Close chat">&#10005;</button>
+    </div>
+    <div class="chat-messages" id="chat-messages">
+      <div class="chat-bubble bot">Hi! I'm Assistant. How can I help you today?</div>
+    </div>
+    <div class="chat-footer">
+      <input id="chat-input" class="chat-input" type="text" placeholder="Type your message&hellip;" autocomplete="off" />
+      <button class="chat-send-btn" id="chat-send" aria-label="Send">&#10148;</button>
+    </div>
+  </div>
+  <button class="chat-toggle-btn" id="chat-toggle" aria-label="Open chat" style="position:relative;">
+    💬
+    <span class="chat-unread" id="chat-unread">1</span>
+  </button>
+</div>
+
+<script>
+/* ── Survey engine ─────────────────────────────────────────────────────── */
+(function () {
+  var steps    = Array.from(document.querySelectorAll('.survey-step'));
+  var current  = 0;
+  var answers  = {};
+  var progress = document.getElementById('survey-progress');
+  var counter  = document.getElementById('survey-step-count');
+  var btnPrev  = document.getElementById('survey-prev');
+  var btnNext  = document.getElementById('survey-next');
+  var btnSub   = document.getElementById('survey-submit');
+  var result   = document.getElementById('survey-result');
+
+  if (!steps.length) return;
+
+  function setProgress() {
+    var pct = (current / steps.length) * 100;
+    if (progress) progress.style.width = pct + '%';
+    if (counter)  counter.textContent  = 'Question ' + (current + 1) + ' of ' + steps.length;
+  }
+
+  function show(idx) {
+    steps.forEach(function (s, i) { s.classList.toggle('active', i === idx); });
+    if (btnPrev) btnPrev.style.display = idx > 0 ? 'inline-block' : 'none';
+    var last = idx === steps.length - 1;
+    if (btnNext) btnNext.style.display = last ? 'none' : 'inline-block';
+    if (btnSub)  btnSub.style.display  = last ? 'inline-block' : 'none';
+    setProgress();
+  }
+
+  /* Answer selection */
+  document.querySelectorAll('.option-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var step = btn.closest('.survey-step');
+      step.querySelectorAll('.option-btn').forEach(function (b) { b.classList.remove('selected'); });
+      btn.classList.add('selected');
+      var idx = steps.indexOf(step);
+      var eligible = (step.dataset.eligible || '').split(',').map(function (v) { return v.trim().toLowerCase(); });
+      answers[idx] = { value: btn.dataset.value, ok: eligible.includes(btn.dataset.value.toLowerCase()) };
+    });
+  });
+
+  /* Shake animation on no-answer-next */
+  function shake(el) {
+    el.style.animation = 'none';
+    el.offsetHeight; /* reflow */
+    el.style.animation = 'survey-shake 0.4s ease';
+  }
+
+  if (btnNext) btnNext.addEventListener('click', function () {
+    if (!answers[current]) { shake(steps[current]); return; }
+    current++;
+    show(current);
+  });
+
+  if (btnPrev) btnPrev.addEventListener('click', function () {
+    current--;
+    show(current);
+  });
+
+  if (btnSub) btnSub.addEventListener('click', function () {
+    if (!answers[current]) { shake(steps[current]); return; }
+    /* Score */
+    var total   = steps.length;
+    var okCount = Object.values(answers).filter(function (a) { return a.ok; }).length;
+    var pass    = okCount >= Math.ceil(total * 0.6);
+
+    /* Hide questions + nav, show result */
+    steps.forEach(function (s) { s.style.display = 'none'; });
+    var nav = document.querySelector('.survey-nav');
+    if (nav) nav.style.display = 'none';
+    if (progress && progress.parentElement) progress.style.width = '100%';
+    if (counter) counter.textContent = 'Complete';
+
+    var elEl = document.getElementById('result-eligible');
+    var inEl = document.getElementById('result-ineligible');
+    if (elEl) elEl.style.display = pass ? 'block' : 'none';
+    if (inEl) inEl.style.display = pass ? 'none'  : 'block';
+    if (result) result.style.display = 'block';
+
+    window._surveyEligible=pass;
+    window._surveyAnswers=steps.map(function(s,i){var a=answers[i]||{};return{question_id:s.dataset.step||String(i+1),question_text:(s.querySelector('.survey-question')||{}).textContent||'',selected_option:a.value||'',is_eligible:a.ok===true?true:a.ok===false?false:null};});
+    setTimeout(function(){var r=document.getElementById('reg-section');if(r){r.style.display='block';var n=document.getElementById('reg-note');if(n){n.style.display='block';n.className='reg-note '+(pass?'eligible':'ineligible');n.textContent=pass?'Great news — you appear to be eligible! Please fill in your details so the study team can reach you.':'Thank you for completing the survey. Please fill in your details so the study team can contact you.';}r.scrollIntoView({behavior:'smooth',block:'start'});}},1200);
+
+    /* Always reveal interaction section after 1.8s */
+    setTimeout(function () {
+      var ia = document.getElementById('interaction-reveal');
+      if (ia) {
+        ia.style.display = '';
+        ia.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 1800);
+  });
+
+  /* Consent checkbox — show submit button when ticked */
+  var consentCheck  = document.getElementById('consent-check');
+  var consentSubmit = document.getElementById('consent-submit');
+  var consentThanks = document.getElementById('consent-thanks');
+  if (consentCheck && consentSubmit) {
+    consentCheck.addEventListener('change', function () {
+      consentSubmit.style.display = this.checked ? 'block' : 'none';
+    });
+    consentSubmit.addEventListener('click', function () {
+      consentSubmit.style.display = 'none';
+      consentCheck.disabled = true;
+      if (consentThanks) consentThanks.style.display = 'block';
+    });
+  }
+
+  show(0);
+})();
+</script>
+<style>
+  @keyframes survey-shake {
+    0%,100% { transform: translateX(0); }
+    20%,60%  { transform: translateX(-8px); }
+    40%,80%  { transform: translateX(8px); }
+  }
+</style>
+
+<script>
+/* ── Floating chat widget ──────────────────────────────────────────────── */
+(function () {
+  var panel   = document.getElementById('chat-panel');
+  var toggle  = document.getElementById('chat-toggle');
+  var close   = document.getElementById('chat-close');
+  var input   = document.getElementById('chat-input');
+  var send    = document.getElementById('chat-send');
+  var box     = document.getElementById('chat-messages');
+  var unread  = document.getElementById('chat-unread');
+  if (!panel || !toggle) return;
+
+  function openChat() {
+    panel.classList.add('open');
+    if (unread) unread.style.display = 'none';
+    if (input)  input.focus();
+  }
+  function closeChat() { panel.classList.remove('open'); }
+
+  toggle.addEventListener('click', function () {
+    panel.classList.contains('open') ? closeChat() : openChat();
+  });
+  if (close) close.addEventListener('click', closeChat);
+
+  function addMsg(text, cls) {
+    var b = document.createElement('div');
+    b.className = 'chat-bubble ' + cls;
+    b.textContent = text;
+    box.appendChild(b);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  var replies = [
+    "Thanks for reaching out! How can I help you today?",
+    "That's a great question — let me help with that.",
+    "Could you share a bit more so I can assist you better?",
+    "Absolutely, our team will follow up with you shortly.",
+    "Happy to help! Here's what I can tell you…"
+  ];
+  var ri = 0;
+
+  function sendMsg() {
+    var val = (input.value || '').trim();
+    if (!val) return;
+    addMsg(val, 'user');
+    input.value = '';
+    var delay = 650 + Math.random() * 500;
+    setTimeout(function () { addMsg(replies[ri++ % replies.length], 'bot'); }, delay);
+  }
+
+  if (send)  send.addEventListener('click', sendMsg);
+  if (input) input.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendMsg(); });
+
+  /* Auto-open after survey reveal */
+  var observer = new MutationObserver(function (mutations) {
+    mutations.forEach(function (m) {
+      if (m.type === 'attributes' && m.attributeName === 'style') {
+        var ia = document.getElementById('interaction-reveal');
+        if (ia && ia.style.display !== 'none') {
+          setTimeout(openChat, 600);
+          observer.disconnect();
+        }
+      }
+    });
+  });
+  var ia = document.getElementById('interaction-reveal');
+  if (ia) observer.observe(ia, { attributes: true });
+  else setTimeout(openChat, 3000);
+})();
+</script>
+
+<script type="module">
+/* ── ElevenLabs Voice Call ─────────────────────────────────────────────── */
+(async function () {
+  var voiceBtn    = document.getElementById('voice-call-btn');
+  var callbackBtn = document.getElementById('callback-btn');
+  if (!voiceBtn) return;
+
+  var AD_ID    = '6a631371-6c94-475c-b0fb-d4946ceeae7c';
+  var API_BASE = window.location.origin;
+  var conversation = null;
+
+  function setBtn(text, disabled) {
+    voiceBtn.textContent   = text;
+    voiceBtn.disabled      = disabled;
+    voiceBtn.style.opacity = disabled ? '0.6' : '1';
+  }
+
+  async function startCall() {
+    setBtn('Connecting…', true);
+    try {
+      /* 1. Fetch signed WebSocket URL from our backend (no auth needed) */
+      var resp = await fetch(API_BASE + '/api/advertisements/' + AD_ID + '/voice-session/token');
+      if (!resp.ok) throw new Error('Session token failed — is the voice agent provisioned? (HTTP ' + resp.status + ')');
+      var data = await resp.json();
+      if (!data.signed_url) throw new Error('No signed URL returned from server');
+
+      /* 2. Load ElevenLabs SDK via ESM (esm.sh handles all dependencies automatically) */
+      var { Conversation } = await import('https://esm.sh/@11labs/client');
+
+      /* 3. Request microphone permission explicitly so errors are clear */
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      /* 4. Start WebSocket voice session — audio never touches our servers */
+      conversation = await Conversation.startSession({
+        signedUrl: data.signed_url,
+        config: {
+          audio: {
+            input: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            output: { echoCancellation: false }
+          },
+          turn_detection: {
+            enabled: true,
+            mode: 'hybrid',
+            client: {
+              enabled: true,
+              threshold: 0.5,
+              silence_ms: 400
+            },
+            server: {
+              enabled: true,
+              sensitivity: 'high'
+            }
+          }
+        },
+        onInterrupt: function() {
+          console.log('[Interruption detected - stopping audio]');
+          if (conversation && conversation.isPlaying) {
+            conversation.stopAudio();
+          }
+        },
+        onConnect: function () {
+          setBtn('⏹ End Call', false);
+        },
+        onDisconnect: function () {
+          setBtn('Start Voice Call →', false);
+          conversation = null;
+        },
+        onError: function (err) {
+          console.error('[ElevenLabs]', err);
+          setBtn('Start Voice Call →', false);
+          conversation = null;
+        },
+      });
+    } catch (e) {
+      setBtn('Start Voice Call →', false);
+      if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+        alert('Microphone access denied.
+Please allow microphone access in your browser and try again.');
+      } else {
+        alert('Could not start call:
+' + e.message);
+      }
+    }
+  }
+
+  voiceBtn.addEventListener('click', function () {
+    if (conversation) {
+      conversation.endSession();
+      return;
+    }
+    startCall();
+  });
+
+  /* ── Callback request form (inline modal) ─────────────────────────── */
+  if (callbackBtn) {
+    var modal = document.createElement('div');
+    modal.innerHTML = '<div id="cb-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;align-items:center;justify-content:center"><div style="background:#fff;border-radius:18px;padding:36px 32px;max-width:420px;width:90%;box-shadow:0 16px 48px rgba(0,0,0,0.22);text-align:center"><h3 style="font-size:1.2rem;font-weight:800;margin-bottom:8px">Request a Callback</h3><p style="color:#64748b;font-size:0.9rem;margin-bottom:20px">Enter your phone number and we'll call you back shortly.</p><input id="cb-phone" type="tel" placeholder="+1 (555) 000-0000" style="width:100%;border:1.5px solid #e2e8f0;border-radius:10px;padding:12px 16px;font-size:0.95rem;margin-bottom:14px;font-family:inherit;outline:none" /><button id="cb-submit" style="width:100%;background:var(--accent,#10b981);color:#fff;border:none;border-radius:50px;padding:13px;font-size:0.95rem;font-weight:700;cursor:pointer;font-family:inherit">Request Callback</button><p id="cb-thanks" style="display:none;margin-top:14px;color:#10b981;font-weight:600">&#10003; Got it! We'll call you back shortly.</p><button id="cb-close" style="margin-top:16px;background:transparent;border:none;color:#94a3b8;cursor:pointer;font-size:0.85rem;font-family:inherit">Cancel</button></div></div>';
+    document.body.appendChild(modal);
+
+    var cbModal  = document.getElementById('cb-modal');
+    var cbPhone  = document.getElementById('cb-phone');
+    var cbSubmit = document.getElementById('cb-submit');
+    var cbThanks = document.getElementById('cb-thanks');
+    var cbClose  = document.getElementById('cb-close');
+
+    callbackBtn.addEventListener('click', function () { cbModal.style.display = 'flex'; cbPhone.focus(); });
+    if (cbClose)  cbClose.addEventListener('click',  function () { cbModal.style.display = 'none'; });
+    if (cbSubmit) cbSubmit.addEventListener('click', function () {
+      var phone = (cbPhone && cbPhone.value || '').trim();
+      if (!phone) { cbPhone.style.borderColor = '#ef4444'; return; }
+      cbPhone.style.borderColor = '#e2e8f0';
+      cbSubmit.style.display = 'none';
+      if (cbThanks) cbThanks.style.display = 'block';
+    });
+  }
+})();
+</script>
+</body>
+</html>

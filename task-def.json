@@ -76,7 +76,7 @@
         {"name": "OPENAI_IMAGE_MODEL",        "value": "gpt-image-1"},
         {"name": "META_OAUTH_REDIRECT_URI",   "value": "https://d2s8k22yb5c8me.cloudfront.net/api/platform-connections/meta/callback"},
         {"name": "APP_PUBLIC_URL",            "value": "https://d2s8k22yb5c8me.cloudfront.net"},
-        {"name": "ELEVENLABS_TTS_MODEL",      "value": "eleven_multilingual_v3"},
+        {"name": "ELEVENLABS_TTS_MODEL",      "value": "eleven_v3_conversational"},
         {"name": "AZURE_OPENAI_API_VERSION",  "value": "2025-04-01-preview"},
         {"name": "AZURE_CHAT_DEPLOYMENT",     "value": "gpt-5"}
       ],

@@ -128,7 +128,15 @@ class WebsiteAgentService:
         bot_welcome = bot_config.get("welcome_message", f"Hi! I'm {bot_name}. How can I help you today?") if isinstance(bot_config, dict) else f"Hi! I'm {bot_name}."
         css         = self._build_css(brand_kit)
         body        = await self._generate_body(ad, brand_kit, company)
-        html        = self._wrap_html(ad.title, css, body, ad_types, bot_name, bot_welcome, ad_id=ad.id)
+        from datetime import date, timedelta
+        today = date.today()
+        win_start = max(ad.trial_start_date, today) if ad.trial_start_date else today
+        win_end   = ad.trial_end_date if ad.trial_end_date else today + timedelta(days=30)
+        html        = self._wrap_html(
+            ad.title, css, body, ad_types, bot_name, bot_welcome, ad_id=ad.id,
+            booking_window_start=str(win_start),
+            booking_window_end=str(win_end),
+        )
 
         index_path = os.path.join(output_dir, "index.html")
         # Drop lone surrogate code points that Claude occasionally emits —
@@ -360,6 +368,8 @@ class WebsiteAgentService:
         bot_name: str = "Assistant",
         bot_welcome: str = "Hi! How can I help you today?",
         ad_id: str = "",
+        booking_window_start: str = "",
+        booking_window_end: str = "",
     ) -> str:
         has_chat     = "chatbot"  in ad_types
         has_voice    = "voicebot" in ad_types
@@ -847,11 +857,13 @@ class WebsiteAgentService:
   var apptSec= document.getElementById('appt-section');
   if (!dateEl || !cBtn) return;
 
-  /* Set min date to today */
+  /* Restrict date to the campaign booking window */
+  var WIN_START = '{booking_window_start}';
+  var WIN_END   = '{booking_window_end}';
   var now = new Date();
-  var mm = String(now.getMonth()+1).padStart(2,'0');
-  var dd = String(now.getDate()).padStart(2,'0');
-  dateEl.min = now.getFullYear()+'-'+mm+'-'+dd;
+  var todayStr = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+  dateEl.min = WIN_START && WIN_START > todayStr ? WIN_START : todayStr;
+  if (WIN_END) dateEl.max = WIN_END;
   try {{ tzEl.textContent = '('+Intl.DateTimeFormat().resolvedOptions().timeZone+')'; }} catch(e) {{}}
 
   var _cache = {{}}, _selTime = '';
@@ -1180,7 +1192,8 @@ class WebsiteAgentService:
         '<div class="cta-phase" id="cta-ph3" style="text-align:center;padding:38px 24px">' +
           '<div class="cta-ring cta-ring-green">&#9989;</div>' +
           '<p style="font-size:1.08rem;font-weight:800;color:#111;margin:0 0 8px">Calling you now!</p>' +
-          '<p style="font-size:.85rem;color:#64748b;line-height:1.6;margin:0 0 22px">Your phone will ring in seconds. Pick up to speak with our agent.</p>' +
+          '<p style="font-size:.85rem;color:#64748b;line-height:1.6;margin:0 0 6px">Your phone will ring in a few seconds. Pick up to speak with our agent.</p>' +
+          '<p id="cta-ph3-hint" style="font-size:.75rem;color:#94a3b8;line-height:1.5;margin:0 0 22px;display:none">Didn’t get a call? The number you entered was <strong id="cta-ph3-num"></strong>. Check it’s correct and try again.</p>' +
           '<button class="cta-btn-outline" id="cta-ok1" style="max-width:180px;margin:0 auto">Done</button>' +
         '</div>' +
         /* ── Phase 4: success schedule ── */
@@ -1218,6 +1231,9 @@ class WebsiteAgentService:
   var ok1      = document.getElementById('cta-ok1');
   var ok2      = document.getElementById('cta-ok2');
   var confMsg  = document.getElementById('cta-conf');
+  var ph3Hint  = document.getElementById('cta-ph3-hint');
+  var ph3Num   = document.getElementById('cta-ph3-num');
+  var _callHintTimer = null;
 
   /* ── Phase helpers ──────────────────────────────────────────────────────── */
   var PH = ['cta-ph1','cta-ph2','cta-ph3','cta-ph4'];
@@ -1238,6 +1254,7 @@ class WebsiteAgentService:
     overlay.classList.remove('cta-open');
     document.body.style.overflow = '';
     closeDd();
+    if (_callHintTimer) {{ clearTimeout(_callHintTimer); _callHintTimer = null; }}
   }}
   xBtn.addEventListener('click', closeModal);
   ok1.addEventListener('click', closeModal);
@@ -1339,12 +1356,19 @@ class WebsiteAgentService:
   /* ── Call Now ───────────────────────────────────────────────────────────── */
   nowBtn.addEventListener('click', function() {{
     if (!validPhone()) {{ showSt(s1,'Please enter a valid phone number.','error'); phoneInp.focus(); return; }}
+    var dialledNumber = fullNum();
     nowBtn.disabled = true;
     nowBtn.innerHTML = '<span class="cta-spin"></span>&ensp;Connecting\u2026';
     schedBtn.disabled = true;
     showSt(s1,'Reaching our agent \u2014 your phone will ring shortly\u2026','info');
-    apiCall(fullNum()).then(function() {{
+    apiCall(dialledNumber).then(function() {{
+      if (ph3Hint) ph3Hint.style.display = 'none';
+      if (ph3Num)  ph3Num.textContent = dialledNumber;
       showPh('cta-ph3');
+      if (_callHintTimer) clearTimeout(_callHintTimer);
+      _callHintTimer = setTimeout(function() {{
+        if (ph3Hint) ph3Hint.style.display = 'block';
+      }}, 30000);
     }}).catch(function(e) {{
       showSt(s1,'&#9888; ' + e.message,'error');
       reset1();
