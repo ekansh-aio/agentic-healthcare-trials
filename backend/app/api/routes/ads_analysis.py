@@ -127,6 +127,68 @@ async def analyze_chat_session(
     return analysis
 
 
+# ── Auto-analyze all sessions without analysis ────────────────────────────────
+
+@router.post("/{ad_id}/auto-analyze")
+async def auto_analyze_campaign(
+    ad_id: str,
+    user: User = Depends(require_roles(_COORDINATOR_ROLES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Background analysis pass: run Claude on every voice session and chat session
+    that doesn't already have analysis. Skips sessions with no transcript/messages.
+    Returns counts of newly analyzed vs skipped sessions.
+    """
+    await _assert_campaign_ownership(ad_id, user, db)
+    svc = ConversationAnalysisService(db)
+
+    # Voice sessions without analysis
+    voice_result = await db.execute(
+        select(VoiceSession)
+        .join(VoiceSession.transcripts)
+        .where(
+            VoiceSession.advertisement_id == ad_id,
+            VoiceSession.call_analysis == None,  # noqa: E711
+        )
+        .distinct()
+    )
+    voice_sessions = voice_result.scalars().all()
+
+    # Chat sessions without analysis
+    chat_result = await db.execute(
+        select(ChatSession).where(
+            ChatSession.campaign_id == ad_id,
+            ChatSession.chat_analysis == None,  # noqa: E711
+        )
+    )
+    chat_sessions = chat_result.scalars().all()
+
+    analyzed = 0
+    skipped = 0
+
+    for vs in voice_sessions:
+        try:
+            await svc.analyze_voice_session(vs.id)
+            analyzed += 1
+        except Exception as e:
+            logger.warning("Auto-analyze skipped voice session %s: %s", vs.id, e)
+            skipped += 1
+
+    for cs in chat_sessions:
+        if not cs.messages:
+            skipped += 1
+            continue
+        try:
+            await svc.analyze_chat_session(cs.id)
+            analyzed += 1
+        except Exception as e:
+            logger.warning("Auto-analyze skipped chat session %s: %s", cs.id, e)
+            skipped += 1
+
+    return {"analyzed": analyzed, "skipped": skipped}
+
+
 # ── List chat sessions for a campaign ────────────────────────────────────────
 
 @router.get("/{ad_id}/chat-sessions")

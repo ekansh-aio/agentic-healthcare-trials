@@ -6,6 +6,11 @@ from app.schemas.enums import AdTypeEnum, AdStatusEnum
 QUESTIONNAIRE_CAMPAIGN_CATEGORIES = {"recruitment", "survey", "hiring", "clinical_trial", "research"}
 
 
+class BookingConfig(BaseModel):
+    slot_duration_minutes: int = Field(default=30, ge=5, le=480)
+    max_per_slot: int = Field(default=3, ge=1, le=500)
+
+
 class AdvertisementCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=512)
     ad_type: List[AdTypeEnum]
@@ -19,6 +24,7 @@ class AdvertisementCreate(BaseModel):
     trial_location: Optional[List[Dict[str, Any]]] = None
     patients_required: Optional[int] = None
     special_instructions: Optional[str] = None
+    booking_config: Optional[BookingConfig] = None
 
 
 class AdvertisementOut(BaseModel):
@@ -38,6 +44,7 @@ class AdvertisementOut(BaseModel):
     hosted_url: Optional[str] = None
     output_files: Optional[List[Dict[str, Any]]] = None
     bot_config: Optional[Dict[str, Any]] = None
+    booking_config: Optional[Dict[str, Any]] = None
     questionnaire: Optional[Dict[str, Any]] = None
     trial_location: Optional[List[Dict[str, Any]]] = None
     patients_required: Optional[int] = None
@@ -62,6 +69,7 @@ class AdvertisementUpdate(BaseModel):
     status: Optional[AdStatusEnum] = None
     trial_location: Optional[List[Dict[str, Any]]] = None
     patients_required: Optional[int] = None
+    booking_config: Optional[Dict[str, Any]] = None
 
 
 class QuestionnaireUpdate(BaseModel):

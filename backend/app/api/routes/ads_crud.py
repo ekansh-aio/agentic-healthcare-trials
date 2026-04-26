@@ -24,6 +24,14 @@ async def create_advertisement(
     user: User = Depends(require_roles([UserRole.STUDY_COORDINATOR])),
     db: AsyncSession = Depends(get_db),
 ):
+    # Build booking_config with guaranteed defaults so downstream logic
+    # never needs to guess. Coordinator can override later via PATCH.
+    raw_bc = body.booking_config.model_dump() if body.booking_config else {}
+    booking_config = {
+        "slot_duration_minutes": raw_bc.get("slot_duration_minutes") or 30,
+        "max_per_slot":          raw_bc.get("max_per_slot")          or 3,
+    }
+
     ad = Advertisement(
         company_id=user.company_id,
         title=body.title,
@@ -38,6 +46,7 @@ async def create_advertisement(
         trial_start_date=body.trial_start_date,
         trial_end_date=body.trial_end_date,
         special_instructions=body.special_instructions,
+        booking_config=booking_config,
         status=AdStatus.DRAFT,
     )
     db.add(ad)
@@ -134,7 +143,17 @@ async def update_advertisement(
     if not ad:
         raise HTTPException(status_code=404, detail="Advertisement not found")
 
-    for field, value in body.model_dump(exclude_unset=True).items():
+    updates = body.model_dump(exclude_unset=True)
+
+    # Merge booking_config patch with existing values and enforce defaults
+    if "booking_config" in updates:
+        existing_bc = ad.booking_config if isinstance(ad.booking_config, dict) else {}
+        merged = {**existing_bc, **(updates["booking_config"] or {})}
+        merged.setdefault("slot_duration_minutes", 30)
+        merged.setdefault("max_per_slot", 3)
+        updates["booking_config"] = merged
+
+    for field, value in updates.items():
         setattr(ad, field, value)
     return ad
 
