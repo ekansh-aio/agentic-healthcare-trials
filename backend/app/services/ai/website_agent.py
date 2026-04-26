@@ -128,7 +128,15 @@ class WebsiteAgentService:
         bot_welcome = bot_config.get("welcome_message", f"Hi! I'm {bot_name}. How can I help you today?") if isinstance(bot_config, dict) else f"Hi! I'm {bot_name}."
         css         = self._build_css(brand_kit)
         body        = await self._generate_body(ad, brand_kit, company)
-        html        = self._wrap_html(ad.title, css, body, ad_types, bot_name, bot_welcome, ad_id=ad.id)
+        from datetime import date, timedelta
+        today = date.today()
+        win_start = max(ad.trial_start_date, today) if ad.trial_start_date else today
+        win_end   = ad.trial_end_date if ad.trial_end_date else today + timedelta(days=30)
+        html        = self._wrap_html(
+            ad.title, css, body, ad_types, bot_name, bot_welcome, ad_id=ad.id,
+            booking_window_start=str(win_start),
+            booking_window_end=str(win_end),
+        )
 
         index_path = os.path.join(output_dir, "index.html")
         # Drop lone surrogate code points that Claude occasionally emits —
@@ -360,6 +368,8 @@ class WebsiteAgentService:
         bot_name: str = "Assistant",
         bot_welcome: str = "Hi! How can I help you today?",
         ad_id: str = "",
+        booking_window_start: str = "",
+        booking_window_end: str = "",
     ) -> str:
         has_chat     = "chatbot"  in ad_types
         has_voice    = "voicebot" in ad_types
@@ -847,11 +857,13 @@ class WebsiteAgentService:
   var apptSec= document.getElementById('appt-section');
   if (!dateEl || !cBtn) return;
 
-  /* Set min date to today */
+  /* Restrict date to the campaign booking window */
+  var WIN_START = '{booking_window_start}';
+  var WIN_END   = '{booking_window_end}';
   var now = new Date();
-  var mm = String(now.getMonth()+1).padStart(2,'0');
-  var dd = String(now.getDate()).padStart(2,'0');
-  dateEl.min = now.getFullYear()+'-'+mm+'-'+dd;
+  var todayStr = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+  dateEl.min = WIN_START && WIN_START > todayStr ? WIN_START : todayStr;
+  if (WIN_END) dateEl.max = WIN_END;
   try {{ tzEl.textContent = '('+Intl.DateTimeFormat().resolvedOptions().timeZone+')'; }} catch(e) {{}}
 
   var _cache = {{}}, _selTime = '';
