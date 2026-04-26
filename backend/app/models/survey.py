@@ -30,6 +30,7 @@ class Appointment(Base):
     advertisement_id   = Column(String, ForeignKey("advertisements.id"), nullable=False)
     survey_response_id = Column(String, ForeignKey("survey_responses.id"), nullable=True)
     voice_session_id   = Column(String, ForeignKey("voice_sessions.id"), nullable=True)
+    chat_session_id    = Column(String, ForeignKey("chat_sessions.id"), nullable=True)
     patient_name       = Column(String(256), nullable=False)
     patient_phone      = Column(String(32), nullable=False)
     slot_datetime      = Column(DateTime, nullable=False)

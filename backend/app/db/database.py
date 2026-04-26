@@ -73,6 +73,8 @@ async def _run_migration(conn, sql: str) -> None:
 _add_column_if_missing = _run_migration
 
 
+
+
 async def init_db():
     """Create all tables and apply lightweight column migrations.
 
@@ -129,6 +131,10 @@ async def init_db():
                 # Conversation analysis results
                 "ALTER TABLE voice_sessions ADD COLUMN call_analysis JSON;",
                 "ALTER TABLE chat_sessions ADD COLUMN chat_analysis JSON;",
+                "ALTER TABLE advertisements ADD COLUMN booking_config JSON;",
+                # Appointment booking source tracking
+                "ALTER TABLE appointments ADD COLUMN voice_session_id VARCHAR;",
+                "ALTER TABLE appointments ADD COLUMN chat_session_id VARCHAR;",
             ]
             for stmt in _sqlite_cols:
                 try:
@@ -211,6 +217,10 @@ async def init_db():
             "ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS call_analysis JSON;")
         await _add_column_if_missing(conn,
             "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS chat_analysis JSON;")
+        await _add_column_if_missing(conn,
+            "ALTER TABLE advertisements ADD COLUMN IF NOT EXISTS booking_config JSON;")
+        await _add_column_if_missing(conn,
+            "ALTER TABLE appointments ADD COLUMN IF NOT EXISTS voice_session_id VARCHAR;")
 
         # chat_sessions.campaign_id — added after initial table creation.
         await _run_migration(conn,

@@ -24,7 +24,7 @@ from app.schemas.brand_kit import BrandKitCreate, BrandKitOut, BrandKitUpdate  #
 from app.schemas.advertisement import (  # noqa: F401
     QUESTIONNAIRE_CAMPAIGN_CATEGORIES,
     AdvertisementCreate, AdvertisementOut, AdvertisementUpdate,
-    QuestionnaireUpdate, BotConfigUpdate,
+    QuestionnaireUpdate, BotConfigUpdate, BookingConfig,
 )
 from app.schemas.review import (  # noqa: F401
     ReviewCreate, ReviewOut,

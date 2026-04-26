@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { SectionCard } from "../shared/Layout";
 import { adsAPI } from "../../services/api";
+import ConversationAnalysis from "./campaign/ConversationAnalysis";
 import {
   Bot, Mic, PhoneCall, PhoneOff, Volume2, Wand2,
   Zap, Trash2, Check, CheckCircle2, Loader2, RefreshCw,
@@ -326,8 +327,8 @@ export default function VoicebotPanel({ ad, adId, isPublisher, isStudyCoordinato
   const [convsLoading,  setConvsLoading]  = useState(false);
   const [convsError,    setConvsError]    = useState(null);
   const [selectedConv,  setSelectedConv]  = useState(null);
-  const [transcript,    setTranscript]    = useState(null);
-  const [transLoading,  setTransLoading]  = useState(false);
+  // Map of conversation_id → { transcript, loading, error }
+  const [transcriptMap, setTranscriptMap] = useState({});
 
   useEffect(() => {
     loadAgentStatus();
@@ -397,12 +398,40 @@ export default function VoicebotPanel({ ad, adId, isPublisher, isStudyCoordinato
   };
 
   const handleSelectConv = async (conv) => {
-    if (selectedConv?.conversation_id === conv.conversation_id) {
+    const id = conv.conversation_id;
+    if (selectedConv?.conversation_id === id) {
       setSelectedConv(null); return;
     }
-    setSelectedConv(conv); setTranscript(null); setTransLoading(true);
-    try { setTranscript(await adsAPI.getVoiceTranscript(conv.conversation_id)); } catch {}
-    setTransLoading(false);
+    setSelectedConv(conv);
+    if (!transcriptMap[id]) {
+      setTranscriptMap(prev => ({ ...prev, [id]: { loading: true, data: null, error: null, analysis: null, analysisLoading: false, analysisError: null, audioUrl: null, audioLoading: true } }));
+      // Fetch transcript and audio in parallel
+      const [transcriptResult, audioResult] = await Promise.allSettled([
+        adsAPI.getVoiceTranscript(id),
+        adsAPI.fetchVoiceRecording(id).then(blob => URL.createObjectURL(blob)),
+      ]);
+      setTranscriptMap(prev => ({
+        ...prev,
+        [id]: {
+          ...prev[id],
+          loading: false,
+          data: transcriptResult.status === "fulfilled" ? transcriptResult.value : null,
+          error: transcriptResult.status === "rejected" ? transcriptResult.reason?.message : null,
+          audioUrl: audioResult.status === "fulfilled" ? audioResult.value : null,
+          audioLoading: false,
+        },
+      }));
+    }
+  };
+
+  const handleAnalyzeConv = async (conversationId) => {
+    setTranscriptMap(prev => ({ ...prev, [conversationId]: { ...prev[conversationId], analysisLoading: true, analysisError: null } }));
+    try {
+      const analysis = await adsAPI.analyzeVoiceConversation(conversationId);
+      setTranscriptMap(prev => ({ ...prev, [conversationId]: { ...prev[conversationId], analysisLoading: false, analysis } }));
+    } catch (e) {
+      setTranscriptMap(prev => ({ ...prev, [conversationId]: { ...prev[conversationId], analysisLoading: false, analysisError: e.message } }));
+    }
   };
 
   const inputStyle = {
@@ -626,66 +655,98 @@ export default function VoicebotPanel({ ad, adId, isPublisher, isStudyCoordinato
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {conversations.map(c => (
-              <div
-                key={c.conversation_id}
-                onClick={() => handleSelectConv(c)}
-                style={{
-                  padding: "12px 14px", borderRadius: 8, cursor: "pointer",
-                  border: `1px solid ${selectedConv?.conversation_id === c.conversation_id ? "var(--color-accent)" : "var(--color-card-border)"}`,
-                  backgroundColor: "var(--color-card-bg)", transition: "border-color 0.15s",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <p style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--color-input-text)", fontFamily: "ui-monospace, monospace" }}>
-                    {c.conversation_id?.slice(0, 16)}…
-                  </p>
-                  <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", textTransform: "capitalize" }}>
-                    {c.status}
-                  </span>
-                </div>
-                {c.start_time && (
-                  <p style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", marginTop: 2 }}>
-                    {new Date(c.start_time * 1000).toLocaleString()}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Transcript viewer */}
-        {selectedConv && (
-          <div style={{ marginTop: 16, padding: "14px 16px", borderRadius: 10, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <p style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--color-input-text)" }}>Transcript</p>
-              <button onClick={() => setSelectedConv(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-sidebar-text)", padding: 4 }}>
-                <XIcon size={14} />
-              </button>
-            </div>
-            {transLoading ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--color-sidebar-text)", fontSize: "0.78rem" }}>
-                <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Loading transcript…
-              </div>
-            ) : transcript ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto" }}>
-                {(transcript.transcript || []).map((turn, i) => (
-                  <div key={i} style={{ display: "flex", gap: 10 }}>
-                    <span style={{
-                      fontSize: "0.7rem", fontWeight: 700, minWidth: 40, flexShrink: 0, marginTop: 2,
-                      color: turn.role === "agent" ? "var(--color-accent)" : "var(--color-sidebar-text)",
-                    }}>
-                      {turn.role === "agent" ? "Agent" : "User"}
+            {conversations.map(c => {
+              const isOpen = selectedConv?.conversation_id === c.conversation_id;
+              const tEntry = transcriptMap[c.conversation_id];
+              return (
+                <div key={c.conversation_id} style={{ borderRadius: 8, border: `1px solid ${isOpen ? "var(--color-accent)" : "var(--color-card-border)"}`, backgroundColor: "var(--color-card-bg)", overflow: "hidden", transition: "border-color 0.15s" }}>
+                  {/* Tile header */}
+                  <div
+                    onClick={() => handleSelectConv(c)}
+                    style={{ padding: "12px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                  >
+                    <div>
+                      <p style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--color-input-text)", fontFamily: "ui-monospace, monospace", margin: 0 }}>
+                        {c.conversation_id?.slice(0, 16)}…
+                      </p>
+                      {c.start_time && (
+                        <p style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", marginTop: 2, marginBottom: 0 }}>
+                          {new Date(c.start_time * 1000).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                    <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", textTransform: "capitalize" }}>
+                      {c.status}
                     </span>
-                    <p style={{ fontSize: "0.78rem", color: "var(--color-input-text)", lineHeight: 1.55, margin: 0 }}>
-                      {turn.message}
-                    </p>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>No transcript data.</p>
-            )}
+
+                  {/* Inline transcript + recording + analysis (shown when selected) */}
+                  {isOpen && (
+                    <div style={{ borderTop: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
+                      {/* Voice recording player */}
+                      <div>
+                        <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-sidebar-text)", marginBottom: 8 }}>
+                          Recording
+                        </p>
+                        {tEntry?.audioLoading ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--color-sidebar-text)", fontSize: "0.78rem" }}>
+                            <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Loading audio…
+                          </div>
+                        ) : tEntry?.audioUrl ? (
+                          <audio controls src={tEntry.audioUrl} style={{ width: "100%", height: 36 }} />
+                        ) : (
+                          <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>No recording available.</p>
+                        )}
+                      </div>
+
+                      {/* Transcript */}
+                      <div>
+                        <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-sidebar-text)", marginBottom: 8 }}>
+                          Transcript
+                        </p>
+                        {tEntry?.loading ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--color-sidebar-text)", fontSize: "0.78rem" }}>
+                            <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Loading transcript…
+                          </div>
+                        ) : tEntry?.error ? (
+                          <p style={{ fontSize: "0.78rem", color: "#ef4444" }}>{tEntry.error}</p>
+                        ) : tEntry?.data ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 280, overflowY: "auto" }}>
+                            {(tEntry.data.transcript || []).map((turn, i) => (
+                              <div key={i} style={{ display: "flex", gap: 10 }}>
+                                <span style={{
+                                  fontSize: "0.7rem", fontWeight: 700, minWidth: 40, flexShrink: 0, marginTop: 2,
+                                  color: turn.role === "agent" ? "var(--color-accent)" : "var(--color-sidebar-text)",
+                                }}>
+                                  {turn.role === "agent" ? "Agent" : "User"}
+                                </span>
+                                <p style={{ fontSize: "0.78rem", color: "var(--color-input-text)", lineHeight: 1.55, margin: 0 }}>
+                                  {turn.message}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>No transcript data.</p>
+                        )}
+                      </div>
+
+                      {/* AI Analysis */}
+                      <div style={{ borderTop: "1px solid var(--color-card-border)", paddingTop: 14 }}>
+                        {tEntry?.analysisError && (
+                          <p style={{ fontSize: "0.78rem", color: "#ef4444", marginBottom: 8 }}>{tEntry.analysisError}</p>
+                        )}
+                        <ConversationAnalysis
+                          analysis={tEntry?.analysis || null}
+                          loading={tEntry?.analysisLoading || false}
+                          onReanalyze={() => handleAnalyzeConv(c.conversation_id)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 

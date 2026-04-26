@@ -1,5 +1,5 @@
 import React from "react";
-import { LayoutDashboard, Layers, ClipboardList, Users, ClipboardCheck, History, Zap } from "lucide-react";
+import { LayoutDashboard, Layers, ClipboardList, Users, ClipboardCheck, History, Zap, CalendarDays } from "lucide-react";
 
 // ─── Page-level tabs ──────────────────────────────────────────────────────────
 export const PAGE_TABS = [
@@ -7,6 +7,7 @@ export const PAGE_TABS = [
   { key: "strategy",      label: "Strategy",      icon: Layers,          alwaysShow: true  },
   { key: "questionnaire", label: "Questionnaire", icon: ClipboardList,   alwaysShow: true  },
   { key: "participants",  label: "Participants",  icon: Users,           alwaysShow: true  },
+  { key: "bookings",      label: "Bookings",      icon: CalendarDays,    alwaysShow: true  },
   { key: "review",        label: "Review",        icon: ClipboardCheck,  alwaysShow: true  },
   { key: "history",       label: "History",       icon: History,         alwaysShow: true  },
   { key: "publish",       label: "Publish",       icon: Zap,             alwaysShow: true  },

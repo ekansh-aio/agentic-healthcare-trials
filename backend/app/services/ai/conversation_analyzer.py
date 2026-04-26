@@ -54,7 +54,7 @@ Output this exact JSON structure:
       "is_eligible": true/false/null
     }
   ],
-  "eligibility_outcome": "eligible" or "not_eligible" or "unknown",
+  "eligibility_outcome": "eligible" or "not_eligible" or "review_needed" or "unknown",
   "drop_off_turn": <integer turn number where user first became ineligible, or null>,
   "drop_off_reason": "brief explanation of why user became ineligible, or null",
   "booking_attempted": true/false,
@@ -64,7 +64,11 @@ Output this exact JSON structure:
 Rules:
 - "questions_asked" should list every distinct question the agent posed, in order
 - "questionnaire_responses" is only the formal screening/eligibility questions
-- If eligibility was never determined, set eligibility_outcome to "unknown"
+- eligibility_outcome rules (in priority order):
+  - "not_eligible": participant gave at least one clearly disqualifying answer
+  - "eligible": participant answered all screening questions and all answers are qualifying
+  - "review_needed": participant answered most but not all screening questions, OR gave an ambiguous answer that could go either way — a human should review
+  - "unknown": the conversation ended before any screening questions were reached
 - drop_off_turn is the turn where the disqualifying answer was given (not when agent acknowledged it)
 - If the user did not provide their name/phone/email, set those fields to null
 - Keep summary factual and concise — no opinions

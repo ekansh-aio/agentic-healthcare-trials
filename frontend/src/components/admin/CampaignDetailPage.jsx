@@ -24,7 +24,7 @@ import React, { useState, useEffect, useCallback, Component } from "react";
 import VoicebotPanel, { VOICE_CATALOGUE } from "./VoicebotPanel";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { PageWithSidebar, SectionCard, CampaignStatusBadge } from "../shared/Layout";
-import { adsAPI, companyAPI, surveyAPI, appointmentsAPI, analysisAPI } from "../../services/api";
+import { adsAPI, companyAPI, surveyAPI, appointmentsAPI, analysisAPI, participantsAPI } from "../../services/api";
 import {
   ArrowLeft, Globe, FileText, CheckCircle2, AlertCircle, ChevronDown,
   Loader2, Layers, Zap, Sparkles,
@@ -109,6 +109,113 @@ class DetailErrorBoundary extends Component {
   }
 }
 
+// ─── VoiceSessionCard ─────────────────────────────────────────────────────────
+function VoiceSessionCard({ vs, campaignId, analysisLoading, onReanalyze }) {
+  const [audioUrl,     setAudioUrl]     = useState(null);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [audioError,   setAudioError]   = useState(null);
+
+  useEffect(() => {
+    if (!vs.elevenlabs_conversation_id) return;
+    let objectUrl;
+    setAudioLoading(true);
+    setAudioError(null);
+    adsAPI.fetchVoiceRecording(vs.elevenlabs_conversation_id)
+      .then(blob => {
+        objectUrl = URL.createObjectURL(blob);
+        setAudioUrl(objectUrl);
+      })
+      .catch(() => setAudioError("Recording not available"))
+      .finally(() => setAudioLoading(false));
+    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [vs.elevenlabs_conversation_id]);
+
+  return (
+    <div style={{ border: "1px solid var(--color-card-border)", borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", backgroundColor: "var(--color-page-bg)", borderBottom: "1px solid var(--color-card-border)" }}>
+        <Phone size={14} style={{ color: "var(--color-accent)", flexShrink: 0 }} />
+        <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--color-input-text)" }}>
+          {vs.phone || "Unknown number"}
+        </span>
+        <span style={{
+          marginLeft: "auto", fontSize: "0.72rem", fontWeight: 600, padding: "2px 8px", borderRadius: 20,
+          backgroundColor: vs.status === "ended" ? "rgba(34,197,94,0.12)" : vs.status === "failed" ? "rgba(239,68,68,0.1)" : "rgba(245,158,11,0.12)",
+          color: vs.status === "ended" ? "#16a34a" : vs.status === "failed" ? "#dc2626" : "#b45309",
+        }}>
+          {vs.status}
+        </span>
+        {vs.duration_seconds != null && (
+          <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)" }}>
+            {Math.floor(vs.duration_seconds / 60)}m {vs.duration_seconds % 60}s
+          </span>
+        )}
+        {vs.started_at && (
+          <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)" }}>
+            {new Date(vs.started_at).toLocaleString()}
+          </span>
+        )}
+      </div>
+
+      {/* Audio player */}
+      {vs.elevenlabs_conversation_id && (
+        <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--color-card-border)", backgroundColor: "var(--color-card-bg)" }}>
+          {audioLoading && (
+            <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)", display: "flex", alignItems: "center", gap: 6 }}>
+              <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> Loading recording…
+            </p>
+          )}
+          {audioError && (
+            <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>{audioError}</p>
+          )}
+          {audioUrl && (
+            <audio controls src={audioUrl} style={{ width: "100%", height: 36 }} />
+          )}
+        </div>
+      )}
+
+      {/* AI Analysis */}
+      <div style={{ padding: "14px 16px", borderBottom: vs.transcripts?.length > 0 ? "1px solid var(--color-card-border)" : "none", backgroundColor: "var(--color-card-bg)" }}>
+        <ConversationAnalysis
+          analysis={vs.call_analysis}
+          sessionId={vs.id}
+          loading={analysisLoading}
+          onReanalyze={onReanalyze}
+        />
+      </div>
+
+      {/* Transcript */}
+      {vs.transcripts?.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 0, maxHeight: 320, overflowY: "auto", padding: "12px 16px" }}>
+          {[...vs.transcripts].sort((a, b) => (a.turn_index ?? 0) - (b.turn_index ?? 0)).map((turn, ti) => (
+            <div key={ti} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "flex-start" }}>
+              <span style={{
+                flexShrink: 0, width: 44, fontSize: "0.68rem", fontWeight: 700, textAlign: "right", paddingTop: 3,
+                color: turn.speaker === "agent" ? "var(--color-accent)" : "var(--color-sidebar-text)",
+                textTransform: "uppercase",
+              }}>
+                {turn.speaker === "agent" ? "Agent" : "User"}
+              </span>
+              <div style={{
+                flex: 1, padding: "8px 12px", borderRadius: 8, fontSize: "0.83rem", lineHeight: 1.5,
+                backgroundColor: turn.speaker === "agent" ? "rgba(var(--accent-rgb, 16,185,129), 0.07)" : "var(--color-page-bg)",
+                border: "1px solid var(--color-card-border)",
+                color: "var(--color-input-text)",
+              }}>
+                {turn.text}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p style={{ fontSize: "0.8rem", color: "var(--color-sidebar-text)", padding: "12px 16px" }}>
+          No transcript available yet.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function CampaignDetailPage() {
   return <DetailErrorBoundary><CampaignDetailPageInner /></DetailErrorBoundary>;
@@ -153,6 +260,7 @@ function CampaignDetailPageInner() {
   const [participants,     setParticipants]     = useState([]);
   const [participantsLoading, setParticipantsLoading] = useState(false);
   const [selectedParticipant, setSelectedParticipant] = useState(null);
+  const [eligibilityFilter,   setEligibilityFilter]   = useState("all"); // "all" | "eligible" | "not_eligible" | "review_needed"
   const [participantAppointments, setParticipantAppointments] = useState([]);
   const [syncingTranscripts,  setSyncingTranscripts]  = useState(false);
   const [syncResult,          setSyncResult]          = useState(null);
@@ -160,13 +268,21 @@ function CampaignDetailPageInner() {
   const [convHistory,         setConvHistory]         = useState([]);
   const [convHistoryLoading,  setConvHistoryLoading]  = useState(false);
   const [selectedConvHistory, setSelectedConvHistory] = useState(null);
-  const [convTranscript,      setConvTranscript]      = useState(null);
-  const [convTransLoading,    setConvTransLoading]    = useState(false);
+  // Map of conversation_id → { loading, data, error, analysis, analysisLoading, analysisError }
+  const [convTranscriptMap,   setConvTranscriptMap]   = useState({});
   // Conversation analysis: maps sessionId → loading bool; analysis lives in the participant object
   const [analysisLoading,     setAnalysisLoading]     = useState({});
   // Chat sessions for the chatbot channel
   const [chatSessions,        setChatSessions]        = useState([]);
   const [chatSessionsLoading, setChatSessionsLoading] = useState(false);
+
+  // Bookings tab
+  const [appointments,        setAppointments]        = useState([]);
+  const [appointmentsLoading, setAppointmentsLoading] = useState(false);
+  const [bookingConfig,       setBookingConfig]       = useState(null);
+  const [bcEditing,           setBcEditing]           = useState(false);
+  const [bcForm,              setBcForm]              = useState({ slot_duration_minutes: 30, max_per_slot: 3 });
+  const [bcSaving,            setBcSaving]            = useState(false);
 
   const saveTitle = async () => {
     const trimmed = titleInput.trim();
@@ -243,10 +359,29 @@ function CampaignDetailPageInner() {
   }, []);
 
   useEffect(() => {
+    if (pageTab !== "bookings" || !id) return;
+    setAppointmentsLoading(true);
+    Promise.all([
+      appointmentsAPI.list(id),
+      appointmentsAPI.getBookingConfig(id),
+    ]).then(([appts, config]) => {
+      setAppointments(appts || []);
+      setBookingConfig(config);
+      setBcForm({ slot_duration_minutes: config.slot_duration_minutes, max_per_slot: config.max_per_slot });
+    }).catch(() => {}).finally(() => setAppointmentsLoading(false));
+  }, [pageTab, id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     if (pageTab !== "participants" || !id) return;
     setParticipantsLoading(true);
-    surveyAPI.list(id)
-      .then((data) => setParticipants(data || []))
+    participantsAPI.list(id)
+      .then((data) => {
+        setParticipants(data || []);
+        // Fire background analysis pass — refreshes participants after it completes
+        analysisAPI.autoAnalyze(id)
+          .then(() => participantsAPI.list(id).then((d) => setParticipants(d || [])))
+          .catch(() => {});
+      })
       .catch(() => setParticipants([]))
       .finally(() => setParticipantsLoading(false));
     // Load voicebot conversation history alongside participants
@@ -268,12 +403,39 @@ function CampaignDetailPageInner() {
   }, [pageTab, id, ad?.ad_type]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSelectConvHistory = async (conv) => {
-    if (selectedConvHistory?.conversation_id === conv.conversation_id) {
+    const cid = conv.conversation_id;
+    if (selectedConvHistory?.conversation_id === cid) {
       setSelectedConvHistory(null); return;
     }
-    setSelectedConvHistory(conv); setConvTranscript(null); setConvTransLoading(true);
-    try { setConvTranscript(await adsAPI.getVoiceTranscript(conv.conversation_id)); } catch {}
-    setConvTransLoading(false);
+    setSelectedConvHistory(conv);
+    if (!convTranscriptMap[cid]) {
+      setConvTranscriptMap(prev => ({ ...prev, [cid]: { loading: true, data: null, error: null, analysis: null, analysisLoading: false, analysisError: null, audioUrl: null, audioLoading: true } }));
+      const [transcriptResult, audioResult] = await Promise.allSettled([
+        adsAPI.getVoiceTranscript(cid),
+        adsAPI.fetchVoiceRecording(cid).then(blob => URL.createObjectURL(blob)),
+      ]);
+      setConvTranscriptMap(prev => ({
+        ...prev,
+        [cid]: {
+          ...prev[cid],
+          loading: false,
+          data: transcriptResult.status === "fulfilled" ? transcriptResult.value : null,
+          error: transcriptResult.status === "rejected" ? transcriptResult.reason?.message : null,
+          audioUrl: audioResult.status === "fulfilled" ? audioResult.value : null,
+          audioLoading: false,
+        },
+      }));
+    }
+  };
+
+  const handleAnalyzeConvHistory = async (conversationId) => {
+    setConvTranscriptMap(prev => ({ ...prev, [conversationId]: { ...prev[conversationId], analysisLoading: true, analysisError: null } }));
+    try {
+      const analysis = await adsAPI.analyzeVoiceConversation(conversationId);
+      setConvTranscriptMap(prev => ({ ...prev, [conversationId]: { ...prev[conversationId], analysisLoading: false, analysis } }));
+    } catch (e) {
+      setConvTranscriptMap(prev => ({ ...prev, [conversationId]: { ...prev[conversationId], analysisLoading: false, analysisError: e.message } }));
+    }
   };
 
   const handleSyncTranscripts = async () => {
@@ -283,7 +445,7 @@ function CampaignDetailPageInner() {
       const result = await surveyAPI.syncTranscripts(id);
       setSyncResult(result);
       // Reload participants to pick up newly linked transcripts
-      const data = await surveyAPI.list(id);
+      const data = await participantsAPI.list(id);
       setParticipants(data || []);
       if (selectedParticipant) {
         const refreshed = (data || []).find((p) => p.id === selectedParticipant.id);
@@ -1212,8 +1374,8 @@ function CampaignDetailPageInner() {
           {selectedParticipant ? (
             /* ── Detail view ── */
             <SectionCard
-              title={selectedParticipant.full_name}
-              subtitle={`Submitted ${new Date(selectedParticipant.created_at).toLocaleString()}`}
+              title={selectedParticipant.name}
+              subtitle={`${selectedParticipant.source ? selectedParticipant.source.charAt(0).toUpperCase() + selectedParticipant.source.slice(1) + " · " : ""}${selectedParticipant.created_at ? new Date(selectedParticipant.created_at).toLocaleString() : ""}`}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
                 <button
@@ -1223,7 +1385,7 @@ function CampaignDetailPageInner() {
                 >
                   <ArrowLeft size={13} /> Back to list
                 </button>
-                {selectedParticipant.voice_sessions?.some(vs => vs.transcripts?.length > 0) && (
+                {selectedParticipant.voice_sessions?.some(vs => vs.transcripts?.length > 0) && selectedParticipant.source !== "chatbot" && (
                   <button
                     onClick={async () => {
                       const sessionsToAnalyze = selectedParticipant.voice_sessions.filter(vs => vs.transcripts?.length > 0);
@@ -1263,11 +1425,12 @@ function CampaignDetailPageInner() {
               {/* Personal details */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16, marginBottom: 24 }}>
                 {[
-                  { label: "Full Name",    value: selectedParticipant.full_name },
-                  { label: "Age",          value: selectedParticipant.age },
-                  { label: "Sex",          value: selectedParticipant.sex.replace(/_/g, " ") },
+                  { label: "Full Name",    value: selectedParticipant.name },
+                  { label: "Age",          value: selectedParticipant.age ?? "—" },
+                  { label: "Sex",          value: selectedParticipant.sex ? selectedParticipant.sex.replace(/_/g, " ") : "—" },
                   { label: "Phone",        value: selectedParticipant.phone },
-                  { label: "Eligibility",  value: selectedParticipant.is_eligible === true ? "Eligible" : selectedParticipant.is_eligible === false ? "Not Eligible" : "Unknown" },
+                  { label: "Source",       value: selectedParticipant.source ? selectedParticipant.source.charAt(0).toUpperCase() + selectedParticipant.source.slice(1) : "—" },
+                  { label: "Eligibility",  value: selectedParticipant.eligibility ? selectedParticipant.eligibility.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "Unknown" },
                 ].map(({ label, value }) => (
                   <div key={label} style={{ padding: "12px 16px", borderRadius: 10, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)" }}>
                     <p style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</p>
@@ -1283,87 +1446,64 @@ function CampaignDetailPageInner() {
                     Voice Calls
                   </p>
                   {selectedParticipant.voice_sessions.map((vs) => (
-                    <div key={vs.id} style={{ border: "1px solid var(--color-card-border)", borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
-                      {/* Session header */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", backgroundColor: "var(--color-page-bg)", borderBottom: "1px solid var(--color-card-border)" }}>
-                        <Phone size={14} style={{ color: "var(--color-accent)", flexShrink: 0 }} />
-                        <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--color-input-text)" }}>
-                          {vs.phone || "Unknown number"}
-                        </span>
-                        <span style={{
-                          marginLeft: "auto", fontSize: "0.72rem", fontWeight: 600, padding: "2px 8px", borderRadius: 20,
-                          backgroundColor: vs.status === "ended" ? "rgba(34,197,94,0.12)" : vs.status === "failed" ? "rgba(239,68,68,0.1)" : "rgba(245,158,11,0.12)",
-                          color: vs.status === "ended" ? "#16a34a" : vs.status === "failed" ? "#dc2626" : "#b45309",
-                        }}>
-                          {vs.status}
-                        </span>
-                        {vs.duration_seconds != null && (
-                          <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)" }}>
-                            {Math.floor(vs.duration_seconds / 60)}m {vs.duration_seconds % 60}s
-                          </span>
-                        )}
-                        <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)" }}>
-                          {new Date(vs.started_at).toLocaleString()}
-                        </span>
-                      </div>
-
-                      {/* AI Analysis panel */}
-                      <div style={{ padding: "14px 16px", borderBottom: vs.transcripts?.length > 0 ? "1px solid var(--color-card-border)" : "none", backgroundColor: "var(--color-card-bg)" }}>
-                        <ConversationAnalysis
-                          analysis={vs.call_analysis}
-                          sessionId={vs.id}
-                          loading={!!analysisLoading[vs.id]}
-                          onReanalyze={vs.transcripts?.length > 0 ? async () => {
-                            setAnalysisLoading(prev => ({ ...prev, [vs.id]: true }));
-                            try {
-                              const result = await analysisAPI.analyzeVoiceSession(id, vs.id);
-                              // Patch the in-memory participant object so UI updates without a full refetch
-                              setSelectedParticipant(prev => ({
-                                ...prev,
-                                voice_sessions: prev.voice_sessions.map(s =>
-                                  s.id === vs.id ? { ...s, call_analysis: result } : s
-                                ),
-                              }));
-                            } catch (e) {
-                              console.error("Analysis failed", e);
-                            } finally {
-                              setAnalysisLoading(prev => ({ ...prev, [vs.id]: false }));
-                            }
-                          } : null}
-                        />
-                      </div>
-
-                      {/* Transcript turns (collapsible feel via max-height) */}
-                      {vs.transcripts?.length > 0 ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 0, maxHeight: 320, overflowY: "auto", padding: "12px 16px" }}>
-                          {[...vs.transcripts].sort((a, b) => (a.turn_index ?? 0) - (b.turn_index ?? 0)).map((turn, ti) => (
-                            <div key={ti} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "flex-start" }}>
-                              <span style={{
-                                flexShrink: 0, width: 44, fontSize: "0.68rem", fontWeight: 700, textAlign: "right",
-                                paddingTop: 3,
-                                color: turn.speaker === "agent" ? "var(--color-accent)" : "var(--color-sidebar-text)",
-                                textTransform: "uppercase",
-                              }}>
-                                {turn.speaker === "agent" ? "Agent" : "User"}
-                              </span>
-                              <div style={{
-                                flex: 1, padding: "8px 12px", borderRadius: 8, fontSize: "0.83rem", lineHeight: 1.5,
-                                backgroundColor: turn.speaker === "agent" ? "rgba(var(--accent-rgb, 16,185,129), 0.07)" : "var(--color-page-bg)",
-                                border: "1px solid var(--color-card-border)",
-                                color: "var(--color-input-text)",
-                              }}>
-                                {turn.text}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p style={{ fontSize: "0.8rem", color: "var(--color-sidebar-text)", padding: "12px 16px" }}>
-                          No transcript available yet. Sync transcripts first to enable analysis.
-                        </p>
-                      )}
-                    </div>
+                    <VoiceSessionCard
+                      key={vs.id}
+                      vs={vs}
+                      campaignId={id}
+                      analysisLoading={!!analysisLoading[vs.id]}
+                      onReanalyze={vs.transcripts?.length > 0 ? async () => {
+                        setAnalysisLoading(prev => ({ ...prev, [vs.id]: true }));
+                        try {
+                          const result = await analysisAPI.analyzeVoiceSession(id, vs.id);
+                          setSelectedParticipant(prev => ({
+                            ...prev,
+                            voice_sessions: prev.voice_sessions.map(s =>
+                              s.id === vs.id ? { ...s, call_analysis: result } : s
+                            ),
+                          }));
+                        } catch (e) { console.error("Analysis failed", e); }
+                        finally { setAnalysisLoading(prev => ({ ...prev, [vs.id]: false })); }
+                      } : null}
+                    />
                   ))}
+                </div>
+              )}
+
+              {/* Chatbot conversation transcript */}
+              {selectedParticipant.source === "chatbot" && selectedParticipant.chat_messages?.length > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                  <p style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 }}>
+                    Chat Conversation
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 0, maxHeight: 340, overflowY: "auto", border: "1px solid var(--color-card-border)", borderRadius: 10, padding: "12px 16px" }}>
+                    {selectedParticipant.chat_messages
+                      .filter(m => m.role !== "system")
+                      .map((m, i) => (
+                        <div key={i} style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "flex-start" }}>
+                          <span style={{
+                            flexShrink: 0, width: 52, fontSize: "0.68rem", fontWeight: 700, textAlign: "right", paddingTop: 3,
+                            color: m.role === "assistant" ? "var(--color-accent)" : "var(--color-sidebar-text)",
+                            textTransform: "uppercase",
+                          }}>
+                            {m.role === "assistant" ? "Bot" : "User"}
+                          </span>
+                          <div style={{
+                            flex: 1, padding: "8px 12px", borderRadius: 8, fontSize: "0.83rem", lineHeight: 1.5,
+                            backgroundColor: m.role === "assistant" ? "rgba(var(--accent-rgb, 16,185,129), 0.07)" : "var(--color-page-bg)",
+                            border: "1px solid var(--color-card-border)",
+                            color: "var(--color-input-text)",
+                          }}>
+                            {typeof m.content === "string" ? m.content : JSON.stringify(m.content)}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                  {/* AI analysis for chat session */}
+                  {selectedParticipant.analysis && (
+                    <div style={{ marginTop: 12 }}>
+                      <ConversationAnalysis analysis={selectedParticipant.analysis} loading={false} onReanalyze={null} />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1427,7 +1567,7 @@ function CampaignDetailPageInner() {
             {/* ── List view ── */}
             <SectionCard
               title="Participants"
-              subtitle="People who completed the survey and submitted their details"
+              subtitle="Everyone who engaged across survey, chatbot, and voicebot"
             >
               {/* Sync transcripts button — only relevant for voicebot campaigns */}
               {ad.ad_type?.includes("voicebot") && (
@@ -1467,62 +1607,134 @@ function CampaignDetailPageInner() {
                   <Users size={32} style={{ color: "var(--color-card-border)", margin: "0 auto 12px" }} />
                   <p style={{ color: "var(--color-sidebar-text)", fontSize: "0.9rem" }}>No participants yet.</p>
                   <p style={{ color: "var(--color-sidebar-text)", fontSize: "0.78rem", marginTop: 4 }}>
-                    Responses will appear here once people complete the survey.
+                    Anyone who shares their name or phone via chatbot, voicebot, or survey will appear here.
                   </p>
                 </div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 0, borderRadius: 10, border: "1px solid var(--color-card-border)", overflow: "hidden" }}>
-                  {/* Table header */}
-                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.5fr 1fr 32px 40px", gap: 0, padding: "10px 16px", backgroundColor: "var(--color-page-bg)", borderBottom: "1px solid var(--color-card-border)" }}>
-                    {["Name", "Age", "Sex", "Phone", "Eligibility", "", ""].map((h) => (
-                      <span key={h} style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</span>
-                    ))}
-                  </div>
-                  {/* Rows */}
-                  {participants.map((p, idx) => (
-                    <div
-                      key={p.id}
-                      onClick={() => {
-                        setSelectedParticipant(p);
-                        setParticipantAppointments([]);
-                        appointmentsAPI.list(id)
-                          .then((all) => setParticipantAppointments((all || []).filter((a) => a.survey_response_id === p.id)))
-                          .catch(() => {});
-                      }}
-                      style={{
-                        display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.5fr 1fr 32px 40px",
-                        gap: 0, padding: "12px 16px", cursor: "pointer",
-                        borderBottom: idx < participants.length - 1 ? "1px solid var(--color-card-border)" : "none",
-                        backgroundColor: "var(--color-card-bg)",
-                        transition: "background-color 0.1s",
-                      }}
-                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-page-bg)"}
-                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "var(--color-card-bg)"}
-                    >
-                      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-input-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.full_name}</span>
-                      <span style={{ fontSize: "0.82rem", color: "var(--color-input-text)" }}>{p.age}</span>
-                      <span style={{ fontSize: "0.82rem", color: "var(--color-input-text)", textTransform: "capitalize" }}>{p.sex.replace(/_/g, " ")}</span>
-                      <span style={{ fontSize: "0.82rem", color: "var(--color-input-text)" }}>{p.phone}</span>
-                      <span style={{
-                        display: "inline-flex", alignItems: "center", gap: 4,
-                        fontSize: "0.75rem", fontWeight: 600,
-                        color: p.is_eligible === true ? "#16a34a" : p.is_eligible === false ? "#dc2626" : "var(--color-sidebar-text)",
-                      }}>
-                        {p.is_eligible === true && <CheckCircle2 size={12} />}
-                        {p.is_eligible === false && <AlertCircle size={12} />}
-                        {p.is_eligible === true ? "Eligible" : p.is_eligible === false ? "Not Eligible" : "Unknown"}
-                      </span>
-                      {/* Voice call indicator */}
-                      {p.voice_sessions?.length > 0 ? (
-                        <Phone size={13} style={{ color: "var(--color-accent)", alignSelf: "center" }} title="Has voice call transcript" />
-                      ) : (
-                        <span />
-                      )}
-                      <ChevronDown size={14} style={{ color: "var(--color-sidebar-text)", transform: "rotate(-90deg)" }} />
+              ) : (() => {
+                // Eligibility is pre-computed by the backend for all source types
+                const getEligibility = (p) => p.eligibility || "unknown";
+
+                const FILTERS = [
+                  { key: "all", label: "All" },
+                  { key: "eligible", label: "Eligible" },
+                  { key: "review_needed", label: "Review Needed" },
+                  { key: "not_eligible", label: "Not Eligible" },
+                ];
+
+                const counts = { all: participants.length };
+                participants.forEach(p => {
+                  const e = getEligibility(p);
+                  counts[e] = (counts[e] || 0) + 1;
+                });
+
+                const filtered = participants
+                  .filter(p => eligibilityFilter === "all" || getEligibility(p) === eligibilityFilter);
+
+                const ELIG_STYLE = {
+                  eligible:     { color: "#16a34a", icon: <CheckCircle2 size={12} />, label: "Eligible" },
+                  not_eligible: { color: "#dc2626", icon: <AlertCircle size={12} />, label: "Not Eligible" },
+                  review_needed:{ color: "#d97706", icon: <AlertCircle size={12} />, label: "Review Needed" },
+                  unknown:      { color: "var(--color-sidebar-text)", icon: null, label: "Unknown" },
+                };
+
+                const SOURCE_STYLE = {
+                  survey:   { color: "#2563eb", label: "Survey" },
+                  chatbot:  { color: "#7c3aed", label: "Chatbot" },
+                  voicebot: { color: "#0891b2", label: "Voicebot" },
+                };
+
+                return (
+                  <>
+                    {/* Eligibility filter bar */}
+                    <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+                      {FILTERS.map(f => {
+                        const active = eligibilityFilter === f.key;
+                        const s = ELIG_STYLE[f.key] || {};
+                        return (
+                          <button
+                            key={f.key}
+                            onClick={() => setEligibilityFilter(f.key)}
+                            style={{
+                              display: "inline-flex", alignItems: "center", gap: 5,
+                              padding: "4px 12px", borderRadius: 20, fontSize: "0.75rem", fontWeight: 600, cursor: "pointer",
+                              border: `1px solid ${active ? (s.color || "var(--color-accent)") : "var(--color-card-border)"}`,
+                              backgroundColor: active ? `${s.color || "var(--color-accent)"}18` : "transparent",
+                              color: active ? (s.color || "var(--color-accent)") : "var(--color-sidebar-text)",
+                              transition: "all 0.15s",
+                            }}
+                          >
+                            {f.label}
+                            {counts[f.key] != null && (
+                              <span style={{ fontSize: "0.68rem", opacity: 0.8 }}>({counts[f.key] || 0})</span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
-                  ))}
-                </div>
-              )}
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 0, borderRadius: 10, border: "1px solid var(--color-card-border)", overflow: "hidden" }}>
+                      {/* Table header */}
+                      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.5fr 1fr 80px 40px", gap: 0, padding: "10px 16px", backgroundColor: "var(--color-page-bg)", borderBottom: "1px solid var(--color-card-border)" }}>
+                        {["Name", "Age", "Phone", "Eligibility", "Source", "", ""].map((h) => (
+                          <span key={h} style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</span>
+                        ))}
+                      </div>
+                      {/* Rows */}
+                      {filtered.length === 0 ? (
+                        <div style={{ padding: "24px 16px", textAlign: "center" }}>
+                          <p style={{ fontSize: "0.82rem", color: "var(--color-sidebar-text)" }}>No participants match this filter.</p>
+                        </div>
+                      ) : filtered.map((p, idx) => {
+                        const elig = getEligibility(p);
+                        const es = ELIG_STYLE[elig] || ELIG_STYLE.unknown;
+                        const ss = SOURCE_STYLE[p.source] || { color: "var(--color-sidebar-text)", label: p.source };
+                        return (
+                          <div
+                            key={p.id}
+                            onClick={() => {
+                              setSelectedParticipant(p);
+                              setParticipantAppointments(p.appointment ? [p.appointment] : []);
+                            }}
+                            style={{
+                              display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.5fr 1fr 80px 40px",
+                              gap: 0, padding: "12px 16px", cursor: "pointer",
+                              borderBottom: idx < filtered.length - 1 ? "1px solid var(--color-card-border)" : "none",
+                              backgroundColor: "var(--color-card-bg)",
+                              transition: "background-color 0.1s",
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--color-page-bg)"}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "var(--color-card-bg)"}
+                          >
+                            <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-input-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                            <span style={{ fontSize: "0.82rem", color: "var(--color-input-text)" }}>{p.age ?? "—"}</span>
+                            <span style={{ fontSize: "0.82rem", color: "var(--color-input-text)" }}>{p.phone}</span>
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.75rem", fontWeight: 600, color: es.color }}>
+                              {es.icon}
+                              {es.label}
+                            </span>
+                            <span style={{
+                              display: "inline-block", padding: "2px 8px", borderRadius: 20,
+                              fontSize: "0.7rem", fontWeight: 700,
+                              backgroundColor: `${ss.color}18`, color: ss.color,
+                              border: `1px solid ${ss.color}40`,
+                            }}>
+                              {ss.label}
+                            </span>
+                            {p.voice_sessions?.length > 0 ? (
+                              <Phone size={13} style={{ color: "var(--color-accent)", alignSelf: "center" }} title="Has voice call" />
+                            ) : p.source === "chatbot" ? (
+                              <MessageSquare size={13} style={{ color: "#7c3aed", alignSelf: "center" }} title="Chatbot booking" />
+                            ) : (
+                              <span />
+                            )}
+                            <ChevronDown size={14} style={{ color: "var(--color-sidebar-text)", transform: "rotate(-90deg)" }} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                );
+              })()}
             </SectionCard>
           )}
 
@@ -1540,64 +1752,96 @@ function CampaignDetailPageInner() {
                   </div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {convHistory.map(c => (
-                      <div
-                        key={c.conversation_id}
-                        onClick={() => handleSelectConvHistory(c)}
-                        style={{
-                          padding: "12px 14px", borderRadius: 8, cursor: "pointer",
-                          border: `1px solid ${selectedConvHistory?.conversation_id === c.conversation_id ? "var(--color-accent)" : "var(--color-card-border)"}`,
-                          backgroundColor: "var(--color-card-bg)", transition: "border-color 0.15s",
-                        }}
-                      >
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <p style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--color-input-text)", fontFamily: "ui-monospace, monospace" }}>
-                            {c.conversation_id?.slice(0, 16)}…
-                          </p>
-                          <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", textTransform: "capitalize" }}>{c.status}</span>
-                        </div>
-                        {c.start_time && (
-                          <p style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", marginTop: 2 }}>
-                            {new Date(c.start_time * 1000).toLocaleString()}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Transcript viewer */}
-                {selectedConvHistory && (
-                  <div style={{ marginTop: 16, padding: "14px 16px", borderRadius: 10, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                      <p style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--color-input-text)" }}>Transcript</p>
-                      <button onClick={() => setSelectedConvHistory(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-sidebar-text)", padding: 4 }}>
-                        <XIcon size={14} />
-                      </button>
-                    </div>
-                    {convTransLoading ? (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--color-sidebar-text)", fontSize: "0.78rem" }}>
-                        <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Loading transcript…
-                      </div>
-                    ) : convTranscript ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto" }}>
-                        {(convTranscript.transcript || []).map((turn, i) => (
-                          <div key={i} style={{ display: "flex", gap: 10 }}>
-                            <span style={{
-                              fontSize: "0.7rem", fontWeight: 700, minWidth: 40, flexShrink: 0, marginTop: 2,
-                              color: turn.role === "agent" ? "var(--color-accent)" : "var(--color-sidebar-text)",
-                            }}>
-                              {turn.role === "agent" ? "Agent" : "User"}
-                            </span>
-                            <p style={{ fontSize: "0.78rem", color: "var(--color-input-text)", lineHeight: 1.55, margin: 0 }}>
-                              {turn.message}
-                            </p>
+                    {convHistory.map(c => {
+                      const isOpen = selectedConvHistory?.conversation_id === c.conversation_id;
+                      const tEntry = convTranscriptMap[c.conversation_id];
+                      return (
+                        <div key={c.conversation_id} style={{ borderRadius: 8, border: `1px solid ${isOpen ? "var(--color-accent)" : "var(--color-card-border)"}`, backgroundColor: "var(--color-card-bg)", overflow: "hidden", transition: "border-color 0.15s" }}>
+                          {/* Tile header */}
+                          <div
+                            onClick={() => handleSelectConvHistory(c)}
+                            style={{ padding: "12px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                          >
+                            <div>
+                              <p style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--color-input-text)", fontFamily: "ui-monospace, monospace", margin: 0 }}>
+                                {c.conversation_id?.slice(0, 16)}…
+                              </p>
+                              {c.start_time && (
+                                <p style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", marginTop: 2, marginBottom: 0 }}>
+                                  {new Date(c.start_time * 1000).toLocaleString()}
+                                </p>
+                              )}
+                            </div>
+                            <span style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", textTransform: "capitalize" }}>{c.status}</span>
                           </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>No transcript data.</p>
-                    )}
+
+                          {/* Inline transcript + recording + analysis */}
+                          {isOpen && (
+                            <div style={{ borderTop: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)", padding: "14px 16px", display: "flex", flexDirection: "column", gap: 16 }}>
+                              {/* Voice recording player */}
+                              <div>
+                                <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-sidebar-text)", marginBottom: 8 }}>
+                                  Recording
+                                </p>
+                                {tEntry?.audioLoading ? (
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--color-sidebar-text)", fontSize: "0.78rem" }}>
+                                    <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Loading audio…
+                                  </div>
+                                ) : tEntry?.audioUrl ? (
+                                  <audio controls src={tEntry.audioUrl} style={{ width: "100%", height: 36 }} />
+                                ) : (
+                                  <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>No recording available.</p>
+                                )}
+                              </div>
+
+                              {/* Transcript */}
+                              <div>
+                                <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-sidebar-text)", marginBottom: 8 }}>
+                                  Transcript
+                                </p>
+                                {tEntry?.loading ? (
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--color-sidebar-text)", fontSize: "0.78rem" }}>
+                                    <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> Loading transcript…
+                                  </div>
+                                ) : tEntry?.error ? (
+                                  <p style={{ fontSize: "0.78rem", color: "#ef4444" }}>{tEntry.error}</p>
+                                ) : tEntry?.data ? (
+                                  <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 280, overflowY: "auto" }}>
+                                    {(tEntry.data.transcript || []).map((turn, i) => (
+                                      <div key={i} style={{ display: "flex", gap: 10 }}>
+                                        <span style={{
+                                          fontSize: "0.7rem", fontWeight: 700, minWidth: 40, flexShrink: 0, marginTop: 2,
+                                          color: turn.role === "agent" ? "var(--color-accent)" : "var(--color-sidebar-text)",
+                                        }}>
+                                          {turn.role === "agent" ? "Agent" : "User"}
+                                        </span>
+                                        <p style={{ fontSize: "0.78rem", color: "var(--color-input-text)", lineHeight: 1.55, margin: 0 }}>
+                                          {turn.message}
+                                        </p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p style={{ fontSize: "0.78rem", color: "var(--color-sidebar-text)" }}>No transcript data.</p>
+                                )}
+                              </div>
+
+                              {/* AI Analysis */}
+                              <div style={{ borderTop: "1px solid var(--color-card-border)", paddingTop: 14 }}>
+                                {tEntry?.analysisError && (
+                                  <p style={{ fontSize: "0.78rem", color: "#ef4444", marginBottom: 8 }}>{tEntry.analysisError}</p>
+                                )}
+                                <ConversationAnalysis
+                                  analysis={tEntry?.analysis || null}
+                                  loading={tEntry?.analysisLoading || false}
+                                  onReanalyze={() => handleAnalyzeConvHistory(c.conversation_id)}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -1697,6 +1941,198 @@ function CampaignDetailPageInner() {
             )}
             </>
           )}
+        </div>
+      )}
+
+      {/* ══ BOOKINGS tab ══════════════════════════════════════════════════════ */}
+      {pageTab === "bookings" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+
+          {/* ── Booking window config ── */}
+          <SectionCard
+            title="Booking Window Configuration"
+            subtitle="Controls which dates/times participants can book and how many per slot"
+          >
+            {bookingConfig ? (
+              <div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16, marginBottom: 20 }}>
+                  {[
+                    { label: "Window Start",    value: bookingConfig.window_start  || "—" },
+                    { label: "Window End",      value: bookingConfig.window_end    || "—" },
+                    { label: "Slot Duration",   value: `${bookingConfig.slot_duration_minutes} min` },
+                    { label: "Max per Slot",    value: bookingConfig.max_per_slot },
+                  ].map(({ label, value }) => (
+                    <div key={label} style={{ padding: "12px 16px", borderRadius: 8, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-bg)" }}>
+                      <p style={{ fontSize: "0.7rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-sidebar-text)", marginBottom: 4 }}>{label}</p>
+                      <p style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--color-input-text)" }}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+                <p style={{ fontSize: "0.72rem", color: "var(--color-sidebar-text)", marginBottom: 14 }}>
+                  Booking window dates follow the campaign's trial start/end. Update them in the <strong>Overview</strong> tab.
+                </p>
+
+                {isStudyCoordinator && !bcEditing && (
+                  <button
+                    onClick={() => setBcEditing(true)}
+                    className="btn--ghost"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.82rem" }}
+                  >
+                    <Pencil size={13} /> Edit Slot Settings
+                  </button>
+                )}
+
+                {isStudyCoordinator && bcEditing && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 420 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                      <div>
+                        <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--color-sidebar-text)", marginBottom: 4 }}>
+                          Slot Duration (min)
+                        </label>
+                        <input
+                          type="number" min="5" max="480"
+                          value={bcForm.slot_duration_minutes}
+                          onChange={(e) => setBcForm(f => ({ ...f, slot_duration_minutes: parseInt(e.target.value, 10) || 30 }))}
+                          className="field-input"
+                          style={{ marginBottom: 0 }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 600, color: "var(--color-sidebar-text)", marginBottom: 4 }}>
+                          Max Bookings per Slot
+                        </label>
+                        <input
+                          type="number" min="1" max="500"
+                          value={bcForm.max_per_slot}
+                          onChange={(e) => setBcForm(f => ({ ...f, max_per_slot: parseInt(e.target.value, 10) || 1 }))}
+                          className="field-input"
+                          style={{ marginBottom: 0 }}
+                        />
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button
+                        onClick={async () => {
+                          setBcSaving(true);
+                          try {
+                            const updated = await appointmentsAPI.updateBookingConfig(id, bcForm);
+                            setBookingConfig(updated);
+                            setBcEditing(false);
+                          } catch (e) {
+                            alert(e.message || "Failed to save booking config.");
+                          } finally {
+                            setBcSaving(false);
+                          }
+                        }}
+                        disabled={bcSaving}
+                        className="btn--accent"
+                        style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.82rem", padding: "7px 16px", opacity: bcSaving ? 0.7 : 1 }}
+                      >
+                        {bcSaving ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : null}
+                        Save
+                      </button>
+                      <button onClick={() => setBcEditing(false)} className="btn--ghost" style={{ fontSize: "0.82rem", padding: "7px 14px" }}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : appointmentsLoading ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--color-sidebar-text)", fontSize: "0.85rem" }}>
+                <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Loading…
+              </div>
+            ) : (
+              <p style={{ color: "var(--color-sidebar-text)", fontSize: "0.85rem" }}>Could not load booking config.</p>
+            )}
+          </SectionCard>
+
+          {/* ── Appointments list ── */}
+          <SectionCard
+            title="Appointments"
+            subtitle={appointments.length > 0 ? `${appointments.length} booking${appointments.length !== 1 ? "s" : ""} recorded` : "No bookings yet"}
+            actions={
+              <button
+                onClick={() => {
+                  setAppointmentsLoading(true);
+                  appointmentsAPI.list(id).then(a => setAppointments(a || [])).catch(() => {}).finally(() => setAppointmentsLoading(false));
+                }}
+                className="btn--ghost"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.78rem" }}
+              >
+                <RefreshCw size={12} /> Refresh
+              </button>
+            }
+          >
+            {appointmentsLoading ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--color-sidebar-text)", fontSize: "0.85rem" }}>
+                <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> Loading appointments…
+              </div>
+            ) : appointments.length === 0 ? (
+              <p style={{ color: "var(--color-sidebar-text)", fontSize: "0.85rem" }}>
+                No appointments have been booked for this campaign yet.
+              </p>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--color-card-border)" }}>
+                      {["Patient", "Phone", "Date & Time", "Duration", "Status", "Source", "Actions"].map(h => (
+                        <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontSize: "0.7rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-sidebar-text)", whiteSpace: "nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {appointments.map((appt) => {
+                      const dt = new Date(appt.slot_datetime);
+                      const dateStr = dt.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+                      const timeStr = dt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+                      const source = appt.voice_session_id ? "Voicebot" : appt.survey_response_id ? "Survey" : "Chatbot/Direct";
+                      const cancelled = appt.status === "cancelled";
+                      return (
+                        <tr key={appt.id} style={{ borderBottom: "1px solid var(--color-card-border)", opacity: cancelled ? 0.5 : 1 }}>
+                          <td style={{ padding: "10px 12px", fontWeight: 600, color: "var(--color-input-text)" }}>{appt.patient_name}</td>
+                          <td style={{ padding: "10px 12px", color: "var(--color-sidebar-text)" }}>{appt.patient_phone}</td>
+                          <td style={{ padding: "10px 12px", color: "var(--color-input-text)", whiteSpace: "nowrap" }}>{dateStr} · {timeStr}</td>
+                          <td style={{ padding: "10px 12px", color: "var(--color-sidebar-text)" }}>{appt.duration_minutes} min</td>
+                          <td style={{ padding: "10px 12px" }}>
+                            <span style={{
+                              display: "inline-block", padding: "2px 8px", borderRadius: 999, fontSize: "0.72rem", fontWeight: 600,
+                              backgroundColor: cancelled ? "rgba(239,68,68,0.1)" : "rgba(16,185,129,0.1)",
+                              color: cancelled ? "#ef4444" : "#10b981",
+                              border: `1px solid ${cancelled ? "rgba(239,68,68,0.3)" : "rgba(16,185,129,0.3)"}`,
+                            }}>
+                              {appt.status}
+                            </span>
+                          </td>
+                          <td style={{ padding: "10px 12px", color: "var(--color-sidebar-text)", fontSize: "0.75rem" }}>{source}</td>
+                          <td style={{ padding: "10px 12px" }}>
+                            {!cancelled && isStudyCoordinator && (
+                              <button
+                                onClick={async () => {
+                                  if (!confirm(`Cancel ${appt.patient_name}'s appointment?`)) return;
+                                  try {
+                                    const updated = await appointmentsAPI.cancel(id, appt.id);
+                                    setAppointments(prev => prev.map(a => a.id === appt.id ? updated : a));
+                                  } catch (e) {
+                                    alert(e.message || "Failed to cancel appointment.");
+                                  }
+                                }}
+                                style={{ background: "none", border: "none", cursor: "pointer", color: "#ef4444", fontSize: "0.75rem", fontWeight: 600, padding: "2px 6px" }}
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </SectionCard>
+
         </div>
       )}
 

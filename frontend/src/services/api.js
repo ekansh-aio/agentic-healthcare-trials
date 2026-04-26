@@ -125,6 +125,15 @@ async function request(endpoint, options = {}) {
   return res.json();
 }
 
+async function requestBlob(endpoint) {
+  const token = localStorage.getItem("token");
+  const res = await fetch(`${API_BASE}${endpoint}`, {
+    headers: { ...(token && { Authorization: `Bearer ${token}` }) },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.blob();
+}
+
 // ─── M2: Auth ────────────────────────────────────────────────────────────────
 
 // company and role are verified by the backend against the DB on every login.
@@ -678,6 +687,12 @@ export const adsAPI = {
   getVoiceTranscript: (conversationId) =>
     request(`/advertisements/voice-conversations/${conversationId}/transcript`),
 
+  fetchVoiceRecording: (conversationId) =>
+    requestBlob(`/advertisements/voice-conversations/${conversationId}/audio`),
+
+  analyzeVoiceConversation: (conversationId) =>
+    request(`/advertisements/voice-conversations/${conversationId}/analyze`, { method: "POST" }),
+
   // Returns a short-lived signed WebSocket URL for the ElevenLabs browser SDK.
   // No auth required — designed for embedded landing page use.
   getVoiceSessionToken: (adId) =>
@@ -789,6 +804,11 @@ export const analyticsAPI = {
 
 // ─── Survey Responses ─────────────────────────────────────────────────────────
 
+export const participantsAPI = {
+  // Unified list: survey + chatbot + voicebot participants for a campaign.
+  list: (adId) => request(`/advertisements/${adId}/participants`),
+};
+
 export const surveyAPI = {
   // Submit participant details + answers (public — no auth token required).
   submit: (adId, data) =>
@@ -817,6 +837,10 @@ export const surveyAPI = {
 };
 
 export const analysisAPI = {
+  // Background pass — analyze all sessions without analysis for this campaign
+  autoAnalyze: (adId) =>
+    request(`/advertisements/${adId}/auto-analyze`, { method: "POST" }),
+
   // Analyze all voice sessions for a participant
   analyzeParticipant: (adId, responseId) =>
     request(`/advertisements/${adId}/survey-responses/${responseId}/analyze`, { method: "POST" }),
@@ -834,5 +858,30 @@ export const analysisAPI = {
 };
 
 export const appointmentsAPI = {
-  list: (adId) => request(`/advertisements/${adId}/appointments`),
+  list: (adId) =>
+    request(`/advertisements/${adId}/appointments`),
+
+  getSlots: (adId, date) =>
+    request(`/advertisements/${adId}/appointments/slots?date=${date}`),
+
+  book: (adId, data) =>
+    request(`/advertisements/${adId}/appointments`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  cancel: (adId, appointmentId) =>
+    request(`/advertisements/${adId}/appointments/${appointmentId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "cancelled" }),
+    }),
+
+  getBookingConfig: (adId) =>
+    request(`/advertisements/${adId}/booking-config`),
+
+  updateBookingConfig: (adId, data) =>
+    request(`/advertisements/${adId}/booking-config`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
 };

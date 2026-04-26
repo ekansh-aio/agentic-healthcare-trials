@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -81,9 +81,13 @@ class AppointmentCreate(BaseModel):
 
 
 class AppointmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     advertisement_id: str
     survey_response_id: Optional[str] = None
+    voice_session_id:   Optional[str] = None
+    chat_session_id:    Optional[str] = None
     patient_name: str
     patient_phone: str
     slot_datetime: datetime
@@ -92,5 +96,13 @@ class AppointmentOut(BaseModel):
     notes: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    @computed_field
+    @property
+    def source(self) -> str:
+        if self.voice_session_id:
+            return "voicebot"
+        if self.survey_response_id:
+            return "survey"
+        if self.chat_session_id:
+            return "chatbot"
+        return "chatbot"

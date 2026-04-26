@@ -414,6 +414,54 @@ class VoicebotAgentService:
             resp.raise_for_status()
             return resp.json()
 
+    async def get_conversation_analysis(self, conversation_id: str) -> dict:
+        """
+        Fetch transcript from ElevenLabs, run Claude analysis, and persist
+        to the matching VoiceSession (by elevenlabs_conversation_id) if one exists.
+        """
+        from app.services.ai.conversation_analyzer import ConversationAnalysisService, _format_voice_transcript
+
+        detail = await self.get_conversation_transcript(conversation_id)
+        transcript_turns = detail.get("transcript") or []
+        metadata = detail.get("metadata") or {}
+        duration = metadata.get("call_duration_secs") or metadata.get("duration_seconds")
+
+        if not transcript_turns:
+            raise ValueError("No transcript available for this conversation")
+
+        class _Turn:
+            def __init__(self, role, text, idx):
+                self.speaker = "agent" if role == "agent" else "user"
+                self.text = text
+                self.turn_index = idx
+
+        turns = [_Turn(t.get("role", "user"), t.get("message", ""), i) for i, t in enumerate(transcript_turns)]
+        transcript_text = _format_voice_transcript(turns, int(duration) if duration else None)
+
+        svc = ConversationAnalysisService(self.db)
+        analysis = await svc._call_claude(transcript_text)
+
+        result = await self.db.execute(
+            select(VoiceSession).where(VoiceSession.elevenlabs_conversation_id == conversation_id)
+        )
+        session = result.scalar_one_or_none()
+        if session:
+            session.call_analysis = analysis
+            await self.db.commit()
+
+        return analysis
+
+    async def get_conversation_audio(self, conversation_id: str) -> bytes:
+        """Fetch the audio recording for a conversation from ElevenLabs."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{ELEVENLABS_BASE}/v1/convai/conversations/{conversation_id}/audio",
+                headers=self._headers,
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            return resp.content
+
     async def sync_all_transcripts(self, advertisement_id: str) -> Dict[str, Any]:
         """
         Pull all completed conversations for this campaign from ElevenLabs,
@@ -802,34 +850,61 @@ Respond with ONLY a valid JSON object, no markdown:
         language = bot_config.get("language", "en")
         agent_name = bot_config.get("bot_name") or voice_name
 
-        # Booking webhook tool — ElevenLabs calls this mid-call when the agent
-        # decides to book a screening appointment for an eligible candidate.
         public_url = (settings.APP_PUBLIC_URL or "").rstrip("/")
-        booking_tool = {
+        base = f"{public_url}/api/advertisements/{advertisement_id or ''}/voice-agent"
+
+        # Tool 1 — check available slots for a date before presenting options to the caller
+        check_slots_tool = {
             "type": "webhook",
-            "name": "book_appointment",
+            "name": "check_available_slots",
             "description": (
-                "Book a screening appointment for a candidate who has passed eligibility "
-                "screening and agreed to attend. Call this ONLY after the candidate confirms "
-                "they want to proceed and has provided their preferred date and time."
+                "Check which appointment slots are available on a given date. "
+                "Call this as soon as the caller mentions a preferred date — "
+                "BEFORE asking them to pick a time. Use the returned list to "
+                "present real options conversationally."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "candidate_name":  {"type": "string", "description": "Full name of the candidate"},
-                    "preferred_date":  {"type": "string", "description": "Preferred appointment date, e.g. '2026-05-10' or 'next Monday'"},
-                    "preferred_time":  {"type": "string", "description": "Preferred time slot, e.g. '10:00 AM' or 'morning'"},
-                    "candidate_phone": {"type": "string", "description": "Candidate's phone number"},
-                    "candidate_email": {"type": "string", "description": "Candidate's email address if provided"},
-                    "notes":           {"type": "string", "description": "Any extra context from the conversation"},
+                    "date": {
+                        "type": "string",
+                        "description": "The date the caller prefers. Use YYYY-MM-DD if known, or natural language like 'next Monday' or 'tomorrow'.",
+                    },
                 },
-                "required": ["candidate_name", "preferred_date", "preferred_time"],
+                "required": ["date"],
             },
-            "url": f"{public_url}/api/voice-agent/{{}}/book-slot",   # EL fills ad_id at runtime via path
+            "url": f"{base}/check-slots",
             "method": "POST",
         }
-        # Embed the ad_id directly in the URL — one webhook URL per provisioned agent
-        booking_tool["url"] = f"{public_url}/api/voice-agent/{advertisement_id or ''}/book-slot"
+
+        # Tool 2 — book the exact slot the caller confirmed
+        booking_tool = {
+            "type": "webhook",
+            "name": "book_appointment",
+            "description": (
+                "Book the specific slot the caller has explicitly confirmed. "
+                "Only call this AFTER check_available_slots has been called, "
+                "the available times have been presented to the caller, and "
+                "the caller has said which time they want."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "candidate_name":             {"type": "string", "description": "Full name of the candidate"},
+                    "date":                       {"type": "string", "description": "Confirmed appointment date in YYYY-MM-DD format"},
+                    "time":                       {"type": "string", "description": "Confirmed slot time in HH:MM 24-hour format, e.g. '10:00'"},
+                    "candidate_phone":            {"type": "string", "description": "Candidate's phone number"},
+                    "candidate_email":            {"type": "string", "description": "Candidate's email address if provided"},
+                    "elevenlabs_conversation_id": {"type": "string", "description": "The current ElevenLabs conversation ID (use system.conversation_id)"},
+                    "notes":                      {"type": "string", "description": "Any extra context from the conversation"},
+                },
+                "required": ["candidate_name", "date", "time"],
+            },
+            "url": f"{base}/book-slot",
+            "method": "POST",
+        }
+
+        tools = [check_slots_tool, booking_tool] if public_url else []
 
         payload: Dict[str, Any] = {
             "name": agent_name,
@@ -839,7 +914,7 @@ Respond with ONLY a valid JSON object, no markdown:
                         "prompt": system_prompt,
                         "llm": "claude-3-7-sonnet",
                         "temperature": 0.7,
-                        "tools": [booking_tool] if public_url else [],
+                        "tools": tools,
                     },
                     "first_message": first_message,
                     "language": language,
@@ -1063,7 +1138,8 @@ Respond with ONLY a valid JSON object, no markdown:
         if public_url:
             sections.append(
                 "## Booking Flow (follow this sequence exactly after eligibility is confirmed)\n"
-                "Once you have determined the caller is eligible AND they express willingness to proceed:\n"
+                "As soon as you have determined the caller is likely eligible — do NOT wait for them to ask.\n"
+                "Proactively offer to book a screening appointment immediately after confirming eligibility.\n"
                 "\n"
                 "Step 1 — Warmly confirm eligibility:\n"
                 "  \"That's great news! <break time=\"0.4s\" /> Based on what you've told me, "
@@ -1073,23 +1149,36 @@ Respond with ONLY a valid JSON object, no markdown:
                 "  \"I can actually lock in a screening appointment for you right now — "
                 "it only takes a moment. <break time=\"0.5s\" /> Would that work for you?\"\n"
                 "\n"
-                "Step 3 — Collect booking details conversationally (one question at a time):\n"
+                "Step 3 — Collect name and phone first (one question at a time):\n"
                 "  a) Full name (\"Could I grab your full name for the booking?\")\n"
-                "  b) Preferred date (\"What date works best for you?\")\n"
-                "  c) Preferred time (\"And is there a time of day that suits — morning, afternoon, or a specific time?\")\n"
-                "  d) Phone number (\"What's the best number to reach you on?\") — skip if already known from outbound call\n"
-                "  e) Email (\"And do you have an email address we can send the confirmation to?\" — optional, don't push)\n"
+                "  b) Phone number (\"And the best number to reach you on?\") — skip if already known from outbound call\n"
                 "\n"
-                "Step 4 — Call the book_appointment tool with all collected details.\n"
-                "  Wait for the confirmation response, then read it naturally to the caller.\n"
+                "Step 4 — Find a mutually suitable slot (back-and-forth until confirmed):\n"
+                "  a) Ask for a preferred date: \"What date works best for you?\"\n"
+                "  b) Immediately call check_available_slots with that date.\n"
+                "     - If the tool returns available times, read them naturally:\n"
+                "       e.g. \"On Tuesday the 3rd we have nine, ten, and eleven in the morning, "
+                "and two and three in the afternoon. Which of those suits you?\"\n"
+                "     - If the tool says no slots that day, read the suggestion it returns "
+                "and ask if the alternative day works.\n"
+                "     - If the caller says none of those times work, ask what day they'd prefer next "
+                "and call check_available_slots again.\n"
+                "  c) Repeat until the caller confirms a specific time. Never guess or invent times.\n"
                 "\n"
-                "Step 5 — Close warmly:\n"
+                "Step 5 — Confirm the booking:\n"
+                "  Repeat the chosen date and time back to the caller once for confirmation, "
+                "then call book_appointment with candidate_name, date (YYYY-MM-DD), time (HH:MM 24h), "
+                "candidate_phone, and any notes.\n"
+                "  Read the tool's confirmation response naturally.\n"
+                "\n"
+                "Step 6 — Close warmly:\n"
                 "  \"You're all set! <break time=\"0.3s\" /> The team will be in touch very soon "
                 "to confirm everything. <break time=\"0.4s\" /> Is there anything else I can help you with today?\"\n"
                 "\n"
                 "RULES:\n"
-                "- Never call book_appointment before the caller explicitly agrees to book.\n"
-                "- Never fabricate a date or time — only use what the caller provides.\n"
+                "- Always call check_available_slots before presenting any times — never invent slots.\n"
+                "- Never call book_appointment until the caller has explicitly confirmed a specific time.\n"
+                "- If the caller says a time doesn't work, offer to check another date — keep going.\n"
                 "- If the caller is not eligible, do NOT offer booking. Thank them sincerely and "
                 "let them know other studies may be a better fit."
             )

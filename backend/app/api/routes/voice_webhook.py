@@ -148,13 +148,19 @@ async def elevenlabs_webhook(
 
     try:
         svc = VoicebotAgentService(db)
-        await svc.store_transcript_from_webhook(
+        session = await svc.store_transcript_from_webhook(
             conversation_id=conversation_id,
             transcript_turns=transcript_raw,
             phone_to=phone_to,
             duration_seconds=duration,
             status=call_status,
         )
+        # Auto-analyze immediately after storing — no manual trigger needed
+        if session and transcript_raw and not session.call_analysis:
+            try:
+                await svc.get_conversation_analysis(conversation_id)
+            except Exception as analysis_exc:
+                logger.warning("Auto-analysis failed for conv %s: %s", conversation_id, analysis_exc)
     except Exception as exc:
         # Log but don't raise — always return 204 to prevent ElevenLabs retries
         logger.error("Failed to store ElevenLabs webhook for conv %s: %s", conversation_id, exc, exc_info=True)
