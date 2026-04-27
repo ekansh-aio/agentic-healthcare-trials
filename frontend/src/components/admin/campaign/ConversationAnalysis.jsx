@@ -100,8 +100,8 @@ export default function ConversationAnalysis({ analysis, sessionId, onReanalyze,
   }
 
   const eligible      = analysis.eligibility_outcome;
-  const eligColor     = eligible === "eligible" ? "#16a34a" : eligible === "not_eligible" ? "#dc2626" : eligible === "review_needed" ? "#d97706" : "var(--color-sidebar-text)";
-  const eligBg        = eligible === "eligible" ? "rgba(34,197,94,0.1)" : eligible === "not_eligible" ? "rgba(239,68,68,0.08)" : eligible === "review_needed" ? "rgba(217,119,6,0.08)" : "rgba(107,114,128,0.08)";
+  const eligColor     = eligible === "eligible" ? "#16a34a" : eligible === "not_eligible" ? "#dc2626" : "#d97706";
+  const eligBg        = eligible === "eligible" ? "rgba(34,197,94,0.1)" : eligible === "not_eligible" ? "rgba(239,68,68,0.08)" : "rgba(217,119,6,0.08)";
   const questionnaire = analysis.questionnaire_responses || [];
   const questions     = analysis.questions_asked || [];
   const infoRetrieved = analysis.information_retrieved || {};
@@ -121,7 +121,7 @@ export default function ConversationAnalysis({ analysis, sessionId, onReanalyze,
           backgroundColor: eligBg, color: eligColor,
           border: `1px solid ${eligColor}40`,
         }}>
-          {eligible === "eligible" ? "Eligible" : eligible === "not_eligible" ? "Not Eligible" : eligible === "review_needed" ? "Review Needed" : "Unknown"}
+          {eligible === "eligible" ? "Eligible" : eligible === "not_eligible" ? "Not Eligible" : "Review Needed"}
         </span>
         {analysis.channel && (
           <span style={{ fontSize: "0.69rem", color: "var(--color-sidebar-text)", backgroundColor: "var(--color-page-bg)", border: "1px solid var(--color-card-border)", borderRadius: 20, padding: "2px 8px" }}>

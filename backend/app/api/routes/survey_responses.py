@@ -315,7 +315,7 @@ async def list_participants(
             "age":            None,
             "sex":            None,
             "source":         "chatbot",
-            "eligibility":    cs.chat_analysis.get("eligibility_outcome", "unknown") if cs and cs.chat_analysis else "unknown",
+            "eligibility":    cs.chat_analysis.get("eligibility_outcome", "review_needed") if cs and cs.chat_analysis else "review_needed",
             "interaction_id": cs.id if cs else appt.chat_session_id,
             "voice_sessions": [],
             "answers":        [],

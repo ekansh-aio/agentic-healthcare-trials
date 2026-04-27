@@ -361,14 +361,16 @@ function CampaignDetailPageInner() {
   useEffect(() => {
     if (pageTab !== "bookings" || !id) return;
     setAppointmentsLoading(true);
-    Promise.all([
-      appointmentsAPI.list(id),
-      appointmentsAPI.getBookingConfig(id),
-    ]).then(([appts, config]) => {
-      setAppointments(appts || []);
-      setBookingConfig(config);
-      setBcForm({ slot_duration_minutes: config.slot_duration_minutes, max_per_slot: config.max_per_slot });
-    }).catch(() => {}).finally(() => setAppointmentsLoading(false));
+    appointmentsAPI.list(id)
+      .then((appts) => setAppointments(appts || []))
+      .catch(() => {})
+      .finally(() => setAppointmentsLoading(false));
+    appointmentsAPI.getBookingConfig(id)
+      .then((config) => {
+        setBookingConfig(config);
+        setBcForm({ slot_duration_minutes: config.slot_duration_minutes, max_per_slot: config.max_per_slot });
+      })
+      .catch(() => {});
   }, [pageTab, id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -1430,7 +1432,7 @@ function CampaignDetailPageInner() {
                   { label: "Sex",          value: selectedParticipant.sex ? selectedParticipant.sex.replace(/_/g, " ") : "—" },
                   { label: "Phone",        value: selectedParticipant.phone },
                   { label: "Source",       value: selectedParticipant.source ? selectedParticipant.source.charAt(0).toUpperCase() + selectedParticipant.source.slice(1) : "—" },
-                  { label: "Eligibility",  value: selectedParticipant.eligibility ? selectedParticipant.eligibility.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "Unknown" },
+                  { label: "Eligibility",  value: (selectedParticipant.eligibility && selectedParticipant.eligibility !== "unknown" ? selectedParticipant.eligibility : "review_needed").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) },
                 ].map(({ label, value }) => (
                   <div key={label} style={{ padding: "12px 16px", borderRadius: 10, border: "1px solid var(--color-card-border)", backgroundColor: "var(--color-page-bg)" }}>
                     <p style={{ fontSize: "0.7rem", fontWeight: 700, color: "var(--color-sidebar-text)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</p>
@@ -1634,7 +1636,7 @@ function CampaignDetailPageInner() {
                   eligible:     { color: "#16a34a", icon: <CheckCircle2 size={12} />, label: "Eligible" },
                   not_eligible: { color: "#dc2626", icon: <AlertCircle size={12} />, label: "Not Eligible" },
                   review_needed:{ color: "#d97706", icon: <AlertCircle size={12} />, label: "Review Needed" },
-                  unknown:      { color: "var(--color-sidebar-text)", icon: null, label: "Unknown" },
+                  unknown:      { color: "#d97706", icon: <AlertCircle size={12} />, label: "Review Needed" },
                 };
 
                 const SOURCE_STYLE = {
@@ -1732,8 +1734,6 @@ function CampaignDetailPageInner() {
                 );
               })()}
             </SectionCard>
-          )}
-
             </>
           )}
         </div>

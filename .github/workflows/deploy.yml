@@ -9,6 +9,7 @@ on:
     branches:
       - dev
       - main
+  workflow_dispatch:
 
 env:
   AWS_REGION: us-east-1
@@ -142,6 +143,7 @@ jobs:
             --service $BACKEND_SERVICE \
             --task-definition $BACKEND_TASK_FAMILY:$BACKEND_REVISION \
             --force-new-deployment \
+            --deployment-configuration '{"deploymentCircuitBreaker":{"enable":false,"rollback":false},"maximumPercent":200,"minimumHealthyPercent":50}' \
             --region $AWS_REGION
 
       # ── 10. Deploy frontend ────────────────────────────────────────────────
@@ -152,6 +154,7 @@ jobs:
             --service $FRONTEND_SERVICE \
             --task-definition $FRONTEND_TASK_FAMILY:$FRONTEND_REVISION \
             --force-new-deployment \
+            --deployment-configuration '{"deploymentCircuitBreaker":{"enable":false,"rollback":false},"maximumPercent":200,"minimumHealthyPercent":50}' \
             --region $AWS_REGION
 
       # ── 11. Wait for rollout to complete ───────────────────────────────────
