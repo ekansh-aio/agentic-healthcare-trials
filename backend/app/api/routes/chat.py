@@ -20,6 +20,7 @@ Key isolation guarantee:
 No auth required — the widget is embedded in a public landing page.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -38,7 +39,7 @@ from openai import AsyncAzureOpenAI, AsyncOpenAI
 
 from app.core.bedrock import get_async_client, get_model, is_configured
 from app.core.config import settings
-from app.db.database import get_db
+from app.db.database import get_db, async_session_factory
 from app.models.models import Advertisement, ChatSession
 from app.models.survey import Appointment
 from app.api.routes.bookings import _booking_config, _campaign_window, _generate_slots
@@ -218,6 +219,17 @@ CHAT_TOOLS_ANTHROPIC = [
 ]
 
 
+async def _analyze_chat_session_bg(chat_session_db_id: str) -> None:
+    """Run conversation analysis for a chat session in a fresh DB session."""
+    try:
+        from app.services.ai.conversation_analyzer import ConversationAnalysisService
+        async with async_session_factory() as db:
+            svc = ConversationAnalysisService(db)
+            await svc.analyze_chat_session(chat_session_db_id)
+    except Exception as exc:
+        logger.warning("Background chat analysis failed for session %s: %s", chat_session_db_id, exc)
+
+
 async def _execute_chat_tool(tool_name: str, tool_args: dict, campaign_id: str, db: AsyncSession, chat_session_db_id: Optional[str] = None) -> str:
     """Execute a chat tool call server-side and return a JSON string result."""
     ad = await db.get(Advertisement, campaign_id)
@@ -319,6 +331,10 @@ async def _execute_chat_tool(tool_name: str, tool_args: dict, campaign_id: str, 
         db.add(appt)
         await db.commit()
         await db.refresh(appt)
+
+        # Kick off analysis in the background so info_retrieved and eligibility are populated
+        if chat_session_db_id:
+            asyncio.ensure_future(_analyze_chat_session_bg(chat_session_db_id))
 
         logger.info("Chat booking created: ad=%s appointment=%s slot=%s patient=%s", campaign_id, appt.id, slot_dt, patient_name)
         return json.dumps({
