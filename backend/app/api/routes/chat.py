@@ -115,7 +115,7 @@ def _ad_to_dict(ad: Advertisement) -> dict:
         # patients_required and budget excluded — must never reach the LLM context
         "bot_config":        ad.bot_config,
         "booking_config":    ad.booking_config,
-        "strategy_json":     _strip_budget(ad.strategy_json),   # budget fields removed
+        "strategy_json":     _strip_private(ad.strategy_json),  # budget fields removed
         "website_reqs":      ad.website_reqs,
         "questionnaire":     ad.questionnaire,
     }
