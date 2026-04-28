@@ -6,7 +6,6 @@ Background tasks are defined here and imported by other modules that need them.
 import asyncio
 import logging
 import os
-import shutil
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -488,12 +487,9 @@ async def host_page(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Copy the generated website HTML into static/pages/<ad_id>/index.html so it is
-    publicly accessible without auth.
+    Publish the landing page by pointing hosted_url at the API endpoint that reads
+    directly from persistent storage (EFS-backed outputs/). No file copy needed.
     """
-    from app.core.config import settings
-    import os as _os
-
     result = await db.execute(
         select(Advertisement).where(
             Advertisement.id == ad_id,
@@ -509,15 +505,7 @@ async def host_page(
             detail="Landing page has not been generated yet. Generate the website first.",
         )
 
-    src = _os.path.join(settings.OUTPUT_DIR, user.company_id, ad_id, "website", "index.html")
-    if not _os.path.exists(src):
-        raise HTTPException(status_code=404, detail="Generated website file not found on disk.")
-
-    dest_dir = _os.path.join(settings.STATIC_DIR, "pages", ad_id)
-    _os.makedirs(dest_dir, exist_ok=True)
-    shutil.copy2(src, _os.path.join(dest_dir, "index.html"))
-
-    ad.hosted_url = f"/static/pages/{ad_id}/index.html"
+    ad.hosted_url = f"/api/advertisements/{ad_id}/website"
     await db.commit()
     await db.refresh(ad)
     return ad

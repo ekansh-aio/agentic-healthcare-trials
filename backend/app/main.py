@@ -34,7 +34,6 @@ async def _security_headers(request: Request, call_next):
     # may be framed (PDF/text preview in an <iframe>) — skip X-Frame-Options.
     _path = request.url.path
     _frameable = (
-        _path.startswith("/static/pages/") or
         _path.endswith("/website") or
         _path.endswith("/file")          # /{ad_id}/documents/{doc_id}/file and company doc files
     )

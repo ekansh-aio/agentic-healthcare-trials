@@ -4,8 +4,6 @@ optimizer change approval/rejection.
 """
 
 import logging
-import os
-import shutil
 from typing import List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -249,7 +247,6 @@ async def approve_optimizer_changes(
       - regenerate_creative → triggers re-upload to Meta
     """
     from app.models.models import PlatformConnection
-    from app.core.config import settings as _settings
 
     review_ids = body.get("review_ids") or []
 
@@ -283,12 +280,8 @@ async def approve_optimizer_changes(
         field  = sugg_approve.get("field")
 
         if action == "regenerate_website":
-            src = os.path.join(_settings.OUTPUT_DIR, user.company_id, ad_id, "website", "index.html")
-            if os.path.exists(src):
-                dest_dir = os.path.join(_settings.STATIC_DIR, "pages", ad_id)
-                os.makedirs(dest_dir, exist_ok=True)
-                shutil.copy2(src, os.path.join(dest_dir, "index.html"))
-                ad.hosted_url = f"/static/pages/{ad_id}/index.html"
+            if ad.output_url:
+                ad.hosted_url = f"/api/advertisements/{ad_id}/website"
                 deployed.append("website re-hosted")
             else:
                 deployed.append("website: no generated file found")
