@@ -4,7 +4,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { hasType } from "./publisherUtils";
 import {
   Mic, PhoneCall, PhoneOff, Volume2, Radio, Zap,
-  Sparkles, CheckCircle2, AlertCircle, MessageSquare, X,
+  Sparkles, CheckCircle2, AlertCircle, MessageSquare, X, ChevronDown,
 } from "lucide-react";
 
 export default function VoicebotConfig({ ad }) {
@@ -48,6 +48,47 @@ export default function VoicebotConfig({ ad }) {
   const [transcript,     setTranscript]     = useState(null);
   const [recommending,   setRecommending]   = useState(false);
   const [recommendation, setRecommendation] = useState(null);
+
+  // ── Voice picker ────────────────────────────────────────────────────────────
+  const [voiceDropdownOpen, setVoiceDropdownOpen] = useState(false);
+  const [voiceSearch,       setVoiceSearch]       = useState("");
+  const [previewingVoiceId, setPreviewingVoiceId] = useState(null);
+  const voiceDropdownRef = useRef(null);
+  const previewAudioRef  = useRef(null);
+
+  const selectedVoice  = voices.find((v) => v.voice_id === form.voice_id) || null;
+  const filteredVoices = voices.filter((v) =>
+    v.name.toLowerCase().includes(voiceSearch.toLowerCase()) ||
+    (v.description || "").toLowerCase().includes(voiceSearch.toLowerCase())
+  );
+
+  useEffect(() => {
+    if (!voiceDropdownOpen) return;
+    const handler = (e) => {
+      if (voiceDropdownRef.current && !voiceDropdownRef.current.contains(e.target)) {
+        setVoiceDropdownOpen(false);
+        setVoiceSearch("");
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [voiceDropdownOpen]);
+
+  const handleVoicePreview = useCallback((voice) => {
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+    if (previewingVoiceId === voice.voice_id) {
+      setPreviewingVoiceId(null);
+      return;
+    }
+    const audio = new Audio(voice.preview_url);
+    previewAudioRef.current = audio;
+    setPreviewingVoiceId(voice.voice_id);
+    audio.play().catch(() => {});
+    audio.onended = () => setPreviewingVoiceId(null);
+  }, [previewingVoiceId]);
 
   // ── Outbound phone call test ────────────────────────────────────────────────
   const [testPhone,       setTestPhone]       = useState("");
@@ -355,16 +396,165 @@ export default function VoicebotConfig({ ad }) {
             placeholder="e.g. Alex"
           />
         </div>
-        <div>
+        {/* ── Custom Voice Picker ─────────────────────────────────────── */}
+        <div style={{ position: "relative" }} ref={voiceDropdownRef}>
           <label style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--color-muted)", display: "block", marginBottom: 4 }}>Voice</label>
-          <select value={form.voice_id} onChange={(e) => setForm((p) => ({ ...p, voice_id: e.target.value }))} className="field-select" disabled={voicesLoading}>
-            {voicesLoading && <option value="">Loading voices…</option>}
-            {voices.map((v) => (
-              <option key={v.voice_id} value={v.voice_id}>
-                {v.name}{v.gender ? ` — ${v.gender.charAt(0).toUpperCase() + v.gender.slice(1)}` : ""}{v.description ? ` · ${v.description}` : ""} · Australian
-              </option>
-            ))}
-          </select>
+
+          {/* Trigger */}
+          <button
+            type="button"
+            onClick={() => !voicesLoading && setVoiceDropdownOpen((o) => !o)}
+            disabled={voicesLoading}
+            style={{
+              width: "100%", display: "flex", alignItems: "center", gap: 8,
+              padding: "8px 10px", borderRadius: "var(--radius-input)",
+              border: `1px solid ${voiceDropdownOpen ? "var(--color-accent)" : "var(--color-input-border)"}`,
+              background: "var(--color-input-bg)", cursor: voicesLoading ? "not-allowed" : "pointer",
+              outline: "none", textAlign: "left",
+              boxShadow: voiceDropdownOpen ? "0 0 0 3px rgba(var(--color-accent-r),var(--color-accent-g),var(--color-accent-b),0.15)" : "none",
+              transition: "border-color 0.15s, box-shadow 0.15s",
+            }}
+          >
+            {voicesLoading ? (
+              <span style={{ flex: 1, fontSize: "0.78rem", color: "var(--color-input-placeholder)" }}>Loading voices…</span>
+            ) : selectedVoice ? (
+              <>
+                <div style={{
+                  width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+                  background: selectedVoice.gender === "female" ? "#fce7f3" : "#dbeafe",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <Mic size={13} color={selectedVoice.gender === "female" ? "#db2777" : "#2563eb"} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: "0.78rem", color: "var(--color-input-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {selectedVoice.name}
+                  </div>
+                  <div style={{ fontSize: "0.67rem", color: "var(--color-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {selectedVoice.description || selectedVoice.gender || ""}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <span style={{ flex: 1, fontSize: "0.78rem", color: "var(--color-input-placeholder)" }}>Select a voice</span>
+            )}
+            <ChevronDown
+              size={14}
+              color="var(--color-muted)"
+              style={{ flexShrink: 0, transition: "transform 0.2s", transform: voiceDropdownOpen ? "rotate(180deg)" : "rotate(0deg)" }}
+            />
+          </button>
+
+          {/* Dropdown panel */}
+          {voiceDropdownOpen && (
+            <div style={{
+              position: "absolute", top: "calc(100% + 5px)", left: 0, right: 0, zIndex: 200,
+              background: "#fff", borderRadius: 10,
+              border: "1px solid var(--color-input-border)",
+              boxShadow: "0 8px 30px rgba(0,0,0,0.12)",
+              display: "flex", flexDirection: "column", overflow: "hidden",
+            }}>
+              {/* Search bar */}
+              <div style={{ padding: "7px 8px 6px", borderBottom: "1px solid var(--color-input-border)" }}>
+                <input
+                  autoFocus
+                  value={voiceSearch}
+                  onChange={(e) => setVoiceSearch(e.target.value)}
+                  placeholder="Search voices…"
+                  style={{
+                    width: "100%", border: "none", outline: "none",
+                    background: "var(--color-input-bg)", borderRadius: 6,
+                    padding: "5px 10px", fontSize: "0.73rem",
+                    color: "var(--color-input-text)", boxSizing: "border-box",
+                  }}
+                />
+              </div>
+
+              {/* List */}
+              <div style={{ overflowY: "auto", maxHeight: 260 }}>
+                {filteredVoices.length === 0 ? (
+                  <div style={{ padding: "14px 12px", textAlign: "center", fontSize: "0.73rem", color: "var(--color-muted)" }}>
+                    No voices match "{voiceSearch}"
+                  </div>
+                ) : filteredVoices.map((v) => {
+                  const isSelected   = form.voice_id === v.voice_id;
+                  const isFemale     = v.gender === "female";
+                  const isPreviewing = previewingVoiceId === v.voice_id;
+
+                  return (
+                    <div
+                      key={v.voice_id}
+                      onClick={() => { setForm((p) => ({ ...p, voice_id: v.voice_id })); setVoiceDropdownOpen(false); setVoiceSearch(""); }}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 9,
+                        padding: "7px 10px",
+                        borderLeft: `3px solid ${isSelected ? "var(--color-accent)" : "transparent"}`,
+                        background: isSelected ? "var(--color-accent-subtle)" : "transparent",
+                        cursor: "pointer", transition: "background 0.1s",
+                      }}
+                      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "#f9fafb"; }}
+                      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}
+                    >
+                      {/* Avatar */}
+                      <div style={{
+                        width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+                        background: isFemale ? "#fce7f3" : "#dbeafe",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        <Mic size={14} color={isFemale ? "#db2777" : "#2563eb"} />
+                      </div>
+
+                      {/* Name + badges + description */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                          <span style={{ fontWeight: 700, fontSize: "0.76rem", color: "var(--color-input-text)" }}>
+                            {v.name}
+                          </span>
+                          <span style={{
+                            fontSize: "0.58rem", fontWeight: 700, padding: "1px 5px", borderRadius: 9999,
+                            background: isFemale ? "#fce7f3" : "#dbeafe",
+                            color: isFemale ? "#db2777" : "#2563eb",
+                          }}>
+                            {isFemale ? "Female" : "Male"}
+                          </span>
+                          <span style={{
+                            fontSize: "0.58rem", fontWeight: 700, padding: "1px 5px", borderRadius: 9999,
+                            background: "#f0fdf4", color: "#16a34a",
+                          }}>
+                            AU
+                          </span>
+                        </div>
+                        <div style={{ fontSize: "0.67rem", color: "var(--color-muted)", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {v.description || ""}
+                        </div>
+                      </div>
+
+                      {/* Preview button */}
+                      {v.preview_url && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleVoicePreview(v); }}
+                          title={isPreviewing ? "Stop preview" : "Preview voice"}
+                          style={{
+                            flexShrink: 0, width: 26, height: 26, borderRadius: "50%",
+                            border: `1px solid ${isPreviewing ? "var(--color-accent)" : "var(--color-input-border)"}`,
+                            background: isPreviewing ? "var(--color-accent-subtle)" : "#fff",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <Volume2 size={11} color={isPreviewing ? "var(--color-accent)" : "#9ca3af"} />
+                        </button>
+                      )}
+
+                      {/* Selected check */}
+                      {isSelected && <CheckCircle2 size={14} color="var(--color-accent)" style={{ flexShrink: 0 }} />}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
         <div className="col-span-2">
           <label style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--color-muted)", display: "block", marginBottom: 4 }}>Opening Message</label>

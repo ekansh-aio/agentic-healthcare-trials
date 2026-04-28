@@ -444,6 +444,21 @@ async def list_australian_voices(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not fetch voices: {exc}")
 
+    # Only expose these curated Australian/Australian-accent voices in the picker.
+    ALLOWED_VOICE_NAMES = {
+        "Arabella",
+        "Ivy- Asian Accent",
+        "Sam from Down Under!",
+        "Kailey - Sales with Sass",
+        "Australian Social Media",
+        "Jason - Narration & Podcast",
+        "Krystal",
+        "Conversational and Real",
+        "Ben",
+        "Paul - Australian Professional Presenter",
+        "Hitch",
+    }
+
     all_voices: List[Dict[str, Any]] = data.get("voices", [])
 
     voices = [
@@ -459,6 +474,7 @@ async def list_australian_voices(
             "labels":      v.get("labels") or {},
         }
         for v in all_voices
+        if (v.get("name", "") or "") in ALLOWED_VOICE_NAMES
     ]
 
     # Sort: females first, then alphabetically by name

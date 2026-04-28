@@ -823,20 +823,29 @@ Respond with ONLY a valid JSON object, no markdown:
         publisher_voice_id = bot_config.get("voice_id")
 
         if publisher_voice_id:
-            # Publisher pinned a specific voice — find its profile for settings
-            selected_profile = next(
+            # Publisher pinned a specific voice — use it directly.
+            # Fall back to profile settings only if it matches a known profile,
+            # otherwise use balanced defaults that work well for any voice.
+            matched_profile = next(
                 (v for v in AUSTRALIAN_VOICES if v["id"] == publisher_voice_id),
-                AUSTRALIAN_VOICES[0],
+                None,
             )
+            voice_id       = publisher_voice_id
+            voice_settings = matched_profile["settings"] if matched_profile else {
+                "stability": 0.55,
+                "similarity_boost": 0.80,
+                "style": 0.35,
+                "use_speaker_boost": False,
+            }
+            voice_name = matched_profile["name"] if matched_profile else bot_config.get("bot_name", "Assistant")
         else:
             # Auto-select by conversation style
             selected_profile = _voice_for_style(conversation_style)
+            voice_id       = selected_profile["id"]
+            voice_settings = selected_profile["settings"]
+            voice_name     = selected_profile["name"]
 
-        voice_id       = selected_profile["id"]
-        voice_settings = selected_profile["settings"]
-        logger.info("Voice selected: %s (%s) style=%s", selected_profile["name"], voice_id, conversation_style)
-
-        voice_name = selected_profile["name"]
+        logger.info("Voice selected: %s (%s) style=%s", voice_name, voice_id, conversation_style)
 
         # Build compliance-focused opening message
         org_name = company_name or "our organization"
