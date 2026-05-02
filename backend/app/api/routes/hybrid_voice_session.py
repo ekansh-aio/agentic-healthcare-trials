@@ -241,15 +241,16 @@ async def flash_voice_ws(
     # Voice selection
     publisher_voice_id = bot_config.get("voice_id")
     if publisher_voice_id:
-        profile = next(
+        matched_profile = next(
             (v for v in AUSTRALIAN_VOICES if v["id"] == publisher_voice_id),
-            AUSTRALIAN_VOICES[0],
+            None,
         )
+        voice_id = publisher_voice_id
+        voice_name = matched_profile["name"] if matched_profile else bot_config.get("bot_name", "Assistant")
     else:
         profile = _voice_for_style(bot_config.get("conversation_style", "warm"))
-
-    voice_id = profile["id"]
-    voice_name = profile["name"]
+        voice_id = profile["id"]
+        voice_name = profile["name"]
 
     company_res = await db.execute(select(Company).where(Company.id == ad.company_id))
     company = company_res.scalar_one_or_none()
