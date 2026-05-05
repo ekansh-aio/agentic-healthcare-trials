@@ -1,19 +1,20 @@
 """
-Ad Compositor — Pharma/Clinical Trial Ad Creative
-═══════════════════════════════════════════════════
+Ad Compositor — Clinical Trial Recruitment Ad Creative
+══════════════════════════════════════════════════════
 
-Design system:
-  • Top panel   : dark brand color + subtle top-to-bottom gradient
-  • Accent bar  : thin colored stripe at very top of panel
-  • Typography  : 3-tier hierarchy with drop shadows + letter-spacing on emphasis
-  • Transition  : soft gradient fade from panel color into the photo
-  • Photo       : center-cropped, fills bottom half
+Three layout styles (set layout["layout_style"]):
 
-Typography tiers:
-  ① Bold italic serif    → intro/continuation phrases (small)
-  ② Huge bold serif      → ALL CAPS condition/hook   (auto-fills width, letter-spaced)
-  ③ Thin divider line    → with subtle opacity
-  ④ Bold sans-serif      → subtext (clean, readable)
+  dark_panel_top : solid brand-colour panel (top N%) + photo (bottom)
+                   → Nucleus Network / Trialfacts / Nightingale style
+  photo_top      : photo (top ~52%) + light/cream panel (bottom)
+                   → Clinical Trial Seeker / George Institute style
+  full_bleed     : photo fills entire canvas + dark gradient scrim
+                   → Sydney Clinic / "1 in 70" style
+
+All layouts render:
+  large bold sans-serif headline (ALL-CAPS words auto-sized bigger)
+  → subtext line
+  → pill CTA button
 """
 
 import io
@@ -21,31 +22,25 @@ import os
 import re
 from typing import List, Tuple
 
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont
 
 # ── Font paths ────────────────────────────────────────────────────────────────
 
-_SERIF_BOLD = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf",
-    "C:/Windows/Fonts/georgiab.ttf",
-    "C:/Windows/Fonts/timesbd.ttf",
-]
-_SERIF_BOLD_ITALIC = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-BoldItalic.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationSerif-BoldItalic.ttf",
-    "C:/Windows/Fonts/georgiaz.ttf",
-    "C:/Windows/Fonts/timesbi.ttf",
-]
 _SANS_BOLD = [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
     "C:/Windows/Fonts/calibrib.ttf",
 ]
+_SANS_REG = [
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+    "C:/Windows/Fonts/calibri.ttf",
+]
 
 
-# ── Low-level helpers ─────────────────────────────────────────────────────────
+# ── Utilities ─────────────────────────────────────────────────────────────────
 
 def _load_font(candidates: list, size: int) -> ImageFont.FreeTypeFont:
     for p in candidates:
@@ -60,102 +55,35 @@ def _load_font(candidates: list, size: int) -> ImageFont.FreeTypeFont:
         return ImageFont.load_default()
 
 
-def _hex_to_rgba(hex_color: str, alpha: int = 255) -> Tuple[int, int, int, int]:
-    h = hex_color.lstrip("#")
+def _hex_to_rgb(h: str) -> Tuple[int, int, int]:
+    h = h.lstrip("#")
     if len(h) == 3:
         h = "".join(c * 2 for c in h)
-    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), alpha)
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
-def _hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
-    return _hex_to_rgba(hex_color)[:3]
+def _hex_to_rgba(h: str, alpha: int = 255) -> Tuple[int, int, int, int]:
+    r, g, b = _hex_to_rgb(h)
+    return (r, g, b, alpha)
+
+
+def _is_light(hex_color: str) -> bool:
+    r, g, b = _hex_to_rgb(hex_color)
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 155
 
 
 def _tw(draw, text: str, font) -> float:
     return draw.textlength(text, font=font)
 
 
-def _tbbox(draw, text: str, font) -> Tuple[int, int, int, int]:
-    return draw.textbbox((0, 0), text, font=font)
-
-
 def _th(draw, text: str, font) -> int:
-    bb = _tbbox(draw, text, font)
+    bb = draw.textbbox((0, 0), text, font=font)
     return bb[3] - bb[1]
 
 
-def _top_offset(draw, text: str, font) -> int:
-    return _tbbox(draw, text, font)[1]
+def _top_off(draw, text: str, font) -> int:
+    return draw.textbbox((0, 0), text, font=font)[1]
 
-
-# ── Design helpers ────────────────────────────────────────────────────────────
-
-def _draw_gradient_rect(img: Image.Image, x0: int, y0: int, x1: int, y1: int,
-                        color_top: tuple, color_bot: tuple) -> None:
-    """Draw a vertical gradient rectangle directly onto img (RGBA)."""
-    w   = x1 - x0
-    h   = y1 - y0
-    if h <= 0 or w <= 0:
-        return
-    band = Image.new("RGBA", (w, h))
-    for row in range(h):
-        t = row / max(h - 1, 1)
-        r = int(color_top[0] + (color_bot[0] - color_top[0]) * t)
-        g = int(color_top[1] + (color_bot[1] - color_top[1]) * t)
-        b = int(color_top[2] + (color_bot[2] - color_top[2]) * t)
-        a = int(color_top[3] + (color_bot[3] - color_top[3]) * t)
-        ImageDraw.Draw(band).line([(0, row), (w, row)], fill=(r, g, b, a))
-    img.alpha_composite(band, dest=(x0, y0))
-
-
-def _draw_shadow_text(draw, x, y, text, font, color, shadow_offset=3, shadow_alpha=100):
-    """Draw text with a soft drop shadow underneath."""
-    sx, sy = x + shadow_offset, y + shadow_offset
-    draw.text((sx, sy), text, font=font, fill=(0, 0, 0, shadow_alpha))
-    draw.text((x,  y),  text, font=font, fill=color)
-
-
-def _draw_letter_spaced(draw, cx, y, text, font, color, spacing=6,
-                        shadow_offset=3, shadow_alpha=100):
-    """
-    Draw text centered at cx with extra letter-spacing between characters.
-    Renders shadow first, then colored text on top.
-    Returns the rendered text width.
-    """
-    chars = list(text)
-    # Measure total width with spacing
-    total_w = sum(_tw(draw, c, font) for c in chars) + spacing * max(0, len(chars) - 1)
-    x = cx - total_w / 2
-
-    for i, ch in enumerate(chars):
-        cw = _tw(draw, ch, font)
-        to = _top_offset(draw, ch, font)
-        # Shadow
-        draw.text((x + shadow_offset, y - to + shadow_offset), ch, font=font,
-                  fill=(0, 0, 0, shadow_alpha))
-        # Text
-        draw.text((x, y - to), ch, font=font, fill=color)
-        x += cw + spacing
-
-    return total_w
-
-
-def _draw_text_centered(draw, cx, y, text, font, color,
-                        shadow_offset=2, shadow_alpha=90):
-    """Draw centered text with drop shadow. Returns line height."""
-    w  = _tw(draw, text, font)
-    h  = _th(draw, text, font)
-    to = _top_offset(draw, text, font)
-    tx = cx - w / 2
-    # Shadow
-    draw.text((tx + shadow_offset, y - to + shadow_offset), text, font=font,
-              fill=(0, 0, 0, shadow_alpha))
-    # Text
-    draw.text((tx, y - to), text, font=font, fill=color)
-    return h
-
-
-# ── Text helpers ──────────────────────────────────────────────────────────────
 
 def _wrap(draw, text: str, font, max_w: float) -> List[str]:
     words = text.split()
@@ -178,7 +106,7 @@ def _wrap(draw, text: str, font, max_w: float) -> List[str]:
 
 
 def _parse_runs(text: str) -> List[Tuple[str, bool]]:
-    """Split into [(segment, is_emphasis)] — consecutive ALL-CAPS words grouped."""
+    """Split headline into [(segment, is_emphasis)] — ALL-CAPS words = emphasis."""
     words = text.split()
     runs, cur, cur_emp = [], [], None
     for word in words:
@@ -197,15 +125,351 @@ def _parse_runs(text: str) -> List[Tuple[str, bool]]:
 
 
 def _fit_font(draw, text: str, max_w: float,
-              max_size: int = 160, min_size: int = 52) -> ImageFont.FreeTypeFont:
+              max_size: int = 160, min_size: int = 44) -> ImageFont.FreeTypeFont:
+    """Largest font where the longest word fits within max_w."""
+    words = text.split() or [text]
     for size in range(max_size, min_size - 1, -4):
-        f = _load_font(_SERIF_BOLD, size)
-        if _tw(draw, text, f) <= max_w:
+        f = _load_font(_SANS_BOLD, size)
+        if all(_tw(draw, w, f) <= max_w for w in words):
             return f
-    return _load_font(_SERIF_BOLD, min_size)
+    return _load_font(_SANS_BOLD, min_size)
 
 
-# ── Main compositor ───────────────────────────────────────────────────────────
+# ── Gradient ──────────────────────────────────────────────────────────────────
+
+def _draw_gradient(img: Image.Image,
+                   x0: int, y0: int, x1: int, y1: int,
+                   c_top: tuple, c_bot: tuple) -> None:
+    w, h = x1 - x0, y1 - y0
+    if w <= 0 or h <= 0:
+        return
+    band = Image.new("RGBA", (w, h))
+    px   = band.load()
+    for row in range(h):
+        t = row / max(h - 1, 1)
+        r = int(c_top[0] + (c_bot[0] - c_top[0]) * t)
+        g = int(c_top[1] + (c_bot[1] - c_top[1]) * t)
+        b = int(c_top[2] + (c_bot[2] - c_top[2]) * t)
+        a = int(c_top[3] + (c_bot[3] - c_top[3]) * t)
+        for col in range(w):
+            px[col, row] = (r, g, b, a)
+    img.alpha_composite(band, (x0, y0))
+
+
+# ── Photo helper ──────────────────────────────────────────────────────────────
+
+def _crop_resize(photo_bytes: bytes, target_w: int, target_h: int) -> Image.Image:
+    img = Image.open(io.BytesIO(photo_bytes)).convert("RGBA")
+    pw, ph = img.size
+    ratio = target_w / target_h
+    if pw / ph > ratio:
+        nw  = int(ph * ratio)
+        img = img.crop(((pw - nw) // 2, 0, (pw - nw) // 2 + nw, ph))
+    else:
+        nh  = int(pw / ratio)
+        img = img.crop((0, (ph - nh) // 2, pw, (ph - nh) // 2 + nh))
+    return img.resize((target_w, target_h), Image.LANCZOS)
+
+
+# ── Text rendering ────────────────────────────────────────────────────────────
+
+def _shadow_text(draw, x: int, y: int, text: str, font,
+                 color: tuple, off: int = 4, alpha: int = 130) -> None:
+    draw.text((x + off, y + off), text, font=font, fill=(0, 0, 0, alpha))
+    draw.text((x, y),             text, font=font, fill=color)
+
+
+def _draw_pill_button(canvas: Image.Image, draw,
+                      cx: int, y: int, text: str, font,
+                      fill: tuple, text_color: tuple,
+                      pad_x: int = 72, pad_y: int = 30,
+                      radius: int = 60) -> int:
+    """Draw a pill CTA button centered at cx, top at y. Returns button height."""
+    tw   = int(_tw(draw, text, font))
+    th   = int(_th(draw, text, font))
+    bw   = tw + pad_x * 2
+    bh   = th + pad_y * 2
+    x0, y0 = cx - bw // 2, y
+    x1, y1 = x0 + bw,     y0 + bh
+
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    ImageDraw.Draw(layer).rounded_rectangle([x0, y0, x1, y1], radius=radius, fill=fill)
+    canvas.alpha_composite(layer)
+
+    to = _top_off(draw, text, font)
+    draw.text((x0 + pad_x, y0 + pad_y - to), text, font=font, fill=text_color)
+    return bh
+
+
+# ── Shared text-block renderer ────────────────────────────────────────────────
+
+def _render_text_block(
+    canvas: Image.Image,
+    layout: dict,
+    region_x0: int, region_y0: int,
+    region_x1: int, region_y1: int,
+    is_over_photo: bool = False,
+) -> None:
+    """
+    Render headline → subtext → CTA pill button, vertically centred inside
+    the given region rectangle.  Modifies canvas in place.
+    """
+    draw = ImageDraw.Draw(canvas)
+
+    headline   = layout.get("headline_text", "")
+    subtext    = layout.get("subtext", "")
+    cta        = layout.get("cta", "Book Now")
+    txt_color  = _hex_to_rgba(layout.get("text_color",    "#FFFFFF"))
+    sub_color  = _hex_to_rgba(layout.get("subtext_color", "#CCCCCC"))
+    panel_hex  = layout.get("top_bg_color", "#0a1f5c")
+
+    rw   = region_x1 - region_x0
+    rh   = region_y1 - region_y0
+    cx   = (region_x0 + region_x1) // 2
+    pad  = 72
+    maxw = rw - pad * 2
+
+    # ── Shadow strength ───────────────────────────────────────────────────────
+    shad_off = 5 if is_over_photo else 3
+    shad_a   = 160 if is_over_photo else 100
+
+    # ── Parse headline into (text, is_emphasis) runs ──────────────────────────
+    runs = _parse_runs(headline)
+
+    EMP_MAX, EMP_MIN = 148, 52   # ALL-CAPS emphasis segments
+    REG_SZ           = 62        # regular-case segments
+
+    segments = []
+    for seg_text, is_emp in runs:
+        if is_emp:
+            f    = _fit_font(draw, seg_text, maxw, max_size=EMP_MAX, min_size=EMP_MIN)
+            lines = _wrap(draw, seg_text, f, maxw)
+        else:
+            f    = _load_font(_SANS_BOLD, REG_SZ)
+            lines = _wrap(draw, seg_text, f, maxw)
+        lh = _th(draw, lines[0] if lines else seg_text, f)
+        segments.append({"font": f, "is_emp": is_emp, "lines": lines, "lh": lh})
+
+    LINE_GAP = 10
+    SEG_GAP  = 18
+
+    hl_h = (
+        sum(s["lh"] * len(s["lines"]) + LINE_GAP * max(0, len(s["lines"]) - 1)
+            for s in segments)
+        + SEG_GAP * max(0, len(segments) - 1)
+    )
+
+    # ── Subtext ───────────────────────────────────────────────────────────────
+    sub_sz   = 46
+    font_sub = _load_font(_SANS_BOLD, sub_sz)
+    sub_lines = _wrap(draw, subtext, font_sub, maxw)
+    sub_lh   = _th(draw, sub_lines[0], font_sub) if sub_lines else 0
+    sub_h    = sub_lh * len(sub_lines) + 8 * max(0, len(sub_lines) - 1)
+
+    # ── CTA button ────────────────────────────────────────────────────────────
+    cta_font = _load_font(_SANS_BOLD, 50)
+    btn_pad_x, btn_pad_y = 72, 30
+    btn_h = _th(draw, cta, cta_font) + btn_pad_y * 2
+
+    SUBTEXT_GAP = 30
+    BTN_GAP     = 48
+
+    total_h = hl_h + SUBTEXT_GAP + sub_h + BTN_GAP + btn_h
+
+    # Vertically centre (clamp to padding)
+    avail = rh - pad * 2
+    if total_h <= avail:
+        y = region_y0 + (rh - total_h) // 2
+    else:
+        # Scale down emphasis font if overflow
+        scale    = avail / total_h
+        new_emp  = max(EMP_MIN, int(EMP_MAX * scale))
+        new_reg  = max(38,      int(REG_SZ  * scale))
+        new_sub  = max(28,      int(sub_sz  * scale))
+        segments = []
+        for seg_text, is_emp in runs:
+            if is_emp:
+                f    = _fit_font(draw, seg_text, maxw, max_size=new_emp, min_size=EMP_MIN)
+                lines = _wrap(draw, seg_text, f, maxw)
+            else:
+                f    = _load_font(_SANS_BOLD, new_reg)
+                lines = _wrap(draw, seg_text, f, maxw)
+            lh = _th(draw, lines[0] if lines else seg_text, f)
+            segments.append({"font": f, "is_emp": is_emp, "lines": lines, "lh": lh})
+        font_sub  = _load_font(_SANS_BOLD, new_sub)
+        sub_lines = _wrap(draw, subtext, font_sub, maxw)
+        sub_lh    = _th(draw, sub_lines[0], font_sub) if sub_lines else 0
+        sub_h     = sub_lh * len(sub_lines) + 8 * max(0, len(sub_lines) - 1)
+        cta_font  = _load_font(_SANS_BOLD, max(32, int(50 * scale)))
+        btn_h     = _th(draw, cta, cta_font) + btn_pad_y * 2
+        hl_h      = (
+            sum(s["lh"] * len(s["lines"]) + LINE_GAP * max(0, len(s["lines"]) - 1)
+                for s in segments)
+            + SEG_GAP * max(0, len(segments) - 1)
+        )
+        total_h   = hl_h + SUBTEXT_GAP + sub_h + BTN_GAP + btn_h
+        y = region_y0 + max(pad, (rh - total_h) // 2)
+
+    # ── Draw headline ─────────────────────────────────────────────────────────
+    for i, seg in enumerate(segments):
+        for j, line in enumerate(seg["lines"]):
+            lw = _tw(draw, line, seg["font"])
+            to = _top_off(draw, line, seg["font"])
+            tx = cx - lw / 2
+            _shadow_text(draw, int(tx), int(y - to), line, seg["font"],
+                         txt_color, shad_off, shad_a)
+            y += seg["lh"]
+            if j < len(seg["lines"]) - 1:
+                y += LINE_GAP
+        if i < len(segments) - 1:
+            y += SEG_GAP
+
+    # ── Draw subtext ──────────────────────────────────────────────────────────
+    y += SUBTEXT_GAP
+    for j, line in enumerate(sub_lines):
+        lw = _tw(draw, line, font_sub)
+        to = _top_off(draw, line, font_sub)
+        tx = cx - lw / 2
+        _shadow_text(draw, int(tx), int(y - to), line, font_sub,
+                     sub_color, max(2, shad_off - 2), shad_a // 2)
+        y += sub_lh
+        if j < len(sub_lines) - 1:
+            y += 8
+
+    # ── CTA pill button ───────────────────────────────────────────────────────
+    y += BTN_GAP
+    if _is_light(panel_hex):
+        # light panel → dark filled button
+        btn_fill = _hex_to_rgba(layout.get("text_color", "#1a1a1a"))
+        btn_txt  = (255, 255, 255, 255)
+    else:
+        # dark panel → white filled button with panel-colour text
+        btn_fill = (255, 255, 255, 255)
+        btn_txt  = _hex_to_rgba(panel_hex)
+
+    _draw_pill_button(canvas, draw, cx, int(y), cta, cta_font,
+                      btn_fill, btn_txt, btn_pad_x, btn_pad_y)
+
+
+# ── Layout: dark panel top + photo bottom ─────────────────────────────────────
+
+def _layout_dark_panel_top(photo_bytes: bytes, layout: dict,
+                            canvas_w: int, canvas_h: int) -> bytes:
+    bg_hex  = layout.get("top_bg_color", "#0a1f5c")
+    top_pct = max(0.38, min(0.55, layout.get("top_height_pct", 44) / 100))
+    top_h   = int(canvas_h * top_pct)
+    bot_h   = canvas_h - top_h
+    bg_rgb  = _hex_to_rgb(bg_hex)
+
+    canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 255))
+
+    # Solid panel
+    panel = Image.new("RGBA", (canvas_w, top_h), (*bg_rgb, 255))
+    canvas.alpha_composite(panel)
+
+    # Subtle top→bottom darkening gradient on panel
+    r, g, b = bg_rgb
+    _draw_gradient(canvas, 0, 0, canvas_w, top_h,
+                   (max(0,r-20), max(0,g-20), max(0,b-20), 110),
+                   (r, g, b, 0))
+
+    # 6-px accent stripe at very top
+    accent = (min(255,r+55), min(255,g+55), min(255,b+75), 255)
+    ImageDraw.Draw(canvas).rectangle([0, 0, canvas_w, 6], fill=accent)
+
+    # Photo in bottom section
+    photo = _crop_resize(photo_bytes, canvas_w, bot_h)
+    canvas.alpha_composite(photo, (0, top_h))
+
+    # Soft gradient fade: panel colour bleeds into photo edge
+    _draw_gradient(canvas, 0, top_h - 60, canvas_w, top_h + 30,
+                   (*bg_rgb, 240), (*bg_rgb, 0))
+
+    # Text block centred in panel
+    _render_text_block(canvas, layout, 0, 0, canvas_w, top_h, is_over_photo=False)
+
+    return _to_png(canvas)
+
+
+# ── Layout: photo top + light panel bottom ────────────────────────────────────
+
+def _layout_photo_top(photo_bytes: bytes, layout: dict,
+                      canvas_w: int, canvas_h: int) -> bytes:
+    photo_pct = max(0.40, min(0.60, layout.get("top_height_pct", 50) / 100))
+    photo_h   = int(canvas_h * photo_pct)
+    panel_h   = canvas_h - photo_h
+    panel_hex = layout.get("top_bg_color", "#F5F0EB")
+    panel_rgb = _hex_to_rgb(panel_hex)
+
+    canvas = Image.new("RGBA", (canvas_w, canvas_h), (*panel_rgb, 255))
+
+    # Photo at top
+    photo = _crop_resize(photo_bytes, canvas_w, photo_h)
+    canvas.alpha_composite(photo, (0, 0))
+
+    # Light panel at bottom (solid)
+    panel = Image.new("RGBA", (canvas_w, panel_h), (*panel_rgb, 255))
+    canvas.alpha_composite(panel, (0, photo_h))
+
+    # Thin separator line between photo and panel
+    div_color = _hex_to_rgba(layout.get("divider_color", "#DDDDDD"), 180)
+    ImageDraw.Draw(canvas).rectangle(
+        [0, photo_h - 2, canvas_w, photo_h + 2], fill=div_color
+    )
+
+    # Soft gradient: photo fades into panel at the join
+    _draw_gradient(canvas, 0, photo_h - 40, canvas_w, photo_h + 10,
+                   (*panel_rgb, 0), (*panel_rgb, 220))
+
+    # Text block in bottom panel
+    _render_text_block(canvas, layout,
+                       0, photo_h, canvas_w, canvas_h,
+                       is_over_photo=False)
+
+    return _to_png(canvas)
+
+
+# ── Layout: full-bleed photo + dark gradient scrim ────────────────────────────
+
+def _layout_full_bleed(photo_bytes: bytes, layout: dict,
+                        canvas_w: int, canvas_h: int) -> bytes:
+    scrim_hex = layout.get("top_bg_color", "#111111")
+    scrim_rgb = _hex_to_rgb(scrim_hex)
+
+    canvas = Image.new("RGBA", (canvas_w, canvas_h))
+
+    # Full-canvas photo
+    photo = _crop_resize(photo_bytes, canvas_w, canvas_h)
+    canvas.alpha_composite(photo)
+
+    # Dark scrim from bottom — covers bottom 55% with deep opacity
+    scrim_h = int(canvas_h * 0.58)
+    _draw_gradient(canvas,
+                   0, canvas_h - scrim_h, canvas_w, canvas_h,
+                   (*scrim_rgb, 0), (*scrim_rgb, 235))
+
+    # Lighter top vignette (adds depth, helps logo area)
+    _draw_gradient(canvas, 0, 0, canvas_w, int(canvas_h * 0.18),
+                   (*scrim_rgb, 120), (*scrim_rgb, 0))
+
+    # Text block in bottom 55%
+    text_region_top = canvas_h - scrim_h + int(scrim_h * 0.06)
+    _render_text_block(canvas, layout,
+                       0, text_region_top, canvas_w, canvas_h,
+                       is_over_photo=True)
+
+    return _to_png(canvas)
+
+
+# ── Output helper ─────────────────────────────────────────────────────────────
+
+def _to_png(canvas: Image.Image) -> bytes:
+    out = io.BytesIO()
+    canvas.convert("RGB").save(out, format="PNG", optimize=True)
+    return out.getvalue()
+
+
+# ── Public entry point ────────────────────────────────────────────────────────
 
 def composite_ad(
     photo_bytes: bytes,
@@ -213,180 +477,9 @@ def composite_ad(
     canvas_w: int = 1080,
     canvas_h: int = 1920,
 ) -> bytes:
-
-    # ── Layout params ─────────────────────────────────────────────────────────
-    bg_hex        = layout.get("top_bg_color",   "#0a1f5c")
-    top_pct       = max(0.40, min(0.55, layout.get("top_height_pct", 46) / 100))
-    headline_text = layout.get("headline_text",  "")
-    subtext       = layout.get("subtext",        "")
-    text_color    = _hex_to_rgba(layout.get("text_color",    "#FFFFFF"))
-    divider_color = _hex_to_rgba(layout.get("divider_color", "#FFFFFF"), 200)
-    subtext_color = _hex_to_rgba(layout.get("subtext_color", "#E8E8E8"))
-
-    bg_rgb  = _hex_to_rgb(bg_hex)
-    top_h   = int(canvas_h * top_pct)
-    bot_h   = canvas_h - top_h
-    pad     = 76
-    cx      = canvas_w // 2
-    max_w   = canvas_w - pad * 2
-
-    # ── RGBA canvas ───────────────────────────────────────────────────────────
-    canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 255))
-
-    # ── Top panel: base color ─────────────────────────────────────────────────
-    panel = Image.new("RGBA", (canvas_w, top_h), (*bg_rgb, 255))
-    canvas.alpha_composite(panel, (0, 0))
-
-    # Subtle gradient overlay: panel darkens slightly at top, neutral at bottom
-    r, g, b = bg_rgb
-    dark  = (max(0, r - 18), max(0, g - 18), max(0, b - 18), 120)
-    light = (r, g, b, 0)
-    _draw_gradient_rect(canvas, 0, 0, canvas_w, top_h, dark, light)
-
-    # ── Accent bar at very top (4px, slightly lighter than bg) ───────────────
-    accent_color = (
-        min(255, r + 60),
-        min(255, g + 60),
-        min(255, b + 80),
-        255,
-    )
-    accent = Image.new("RGBA", (canvas_w, 6), accent_color)
-    canvas.alpha_composite(accent, (0, 0))
-
-    # ── Photo (bottom half) ───────────────────────────────────────────────────
-    photo = Image.open(io.BytesIO(photo_bytes)).convert("RGBA")
-    pw, ph = photo.size
-    ratio  = canvas_w / bot_h
-    if pw / ph > ratio:
-        nw    = int(ph * ratio)
-        photo = photo.crop(((pw - nw) // 2, 0, (pw - nw) // 2 + nw, ph))
-    else:
-        nh    = int(pw / ratio)
-        photo = photo.crop((0, (ph - nh) // 2, pw, (ph - nh) // 2 + nh))
-    photo = photo.resize((canvas_w, bot_h), Image.LANCZOS)
-    canvas.alpha_composite(photo, (0, top_h))
-
-    # ── Gradient fade: panel → photo (softens the hard edge) ─────────────────
-    fade_h = 80
-    fade_top = (*bg_rgb, 255)
-    fade_bot = (*bg_rgb, 0)
-    _draw_gradient_rect(canvas, 0, top_h - fade_h, canvas_w, top_h + 20, fade_top, fade_bot)
-
-    # ── Draw on RGBA canvas ───────────────────────────────────────────────────
-    draw = ImageDraw.Draw(canvas)
-
-    # ── Typography: measure first ─────────────────────────────────────────────
-    ITALIC_SZ    = 54
-    SUB_SZ       = 52
-    ITEM_GAP     = 12
-    LINE_GAP     = 8
-    DIV_MARGIN_T = 34
-    DIV_MARGIN_B = 30
-    DIV_THICK    = 3
-    SUB_LINE_GAP = 10
-    EMP_SPACING  = 8   # letter-spacing px for emphasis run
-
-    font_italic = _load_font(_SERIF_BOLD_ITALIC, ITALIC_SZ)
-    font_sub    = _load_font(_SANS_BOLD,         SUB_SZ)
-
-    # Build segments
-    runs     = _parse_runs(headline_text)
-    segments = []
-    for seg_text, is_emp in runs:
-        if is_emp:
-            font  = _fit_font(draw, seg_text, max_w - EMP_SPACING * len(seg_text))
-            lh    = _th(draw, seg_text, font)
-            segments.append({"text": seg_text, "font": font, "is_emp": True,
-                              "lines": [seg_text], "line_h": lh, "seg_h": lh})
-        else:
-            wrapped = _wrap(draw, seg_text.strip(), font_italic, max_w)
-            lh      = _th(draw, wrapped[0], font_italic)
-            seg_h   = lh * len(wrapped) + LINE_GAP * max(0, len(wrapped) - 1)
-            segments.append({"text": seg_text, "font": font_italic, "is_emp": False,
-                              "lines": wrapped, "line_h": lh, "seg_h": seg_h})
-
-    sub_lines  = _wrap(draw, subtext, font_sub, max_w)
-    sub_line_h = _th(draw, sub_lines[0], font_sub)
-    sub_blk_h  = sub_line_h * len(sub_lines) + SUB_LINE_GAP * max(0, len(sub_lines) - 1)
-
-    hl_blk_h = (sum(s["seg_h"] for s in segments)
-                + ITEM_GAP * max(0, len(segments) - 1))
-    total_h  = hl_blk_h + DIV_MARGIN_T + DIV_THICK + DIV_MARGIN_B + sub_blk_h
-
-    # Scale down if overflow
-    avail_h = top_h - pad * 2
-    if total_h > avail_h and avail_h > 0:
-        scale       = avail_h / total_h
-        ITALIC_SZ   = max(28, int(ITALIC_SZ * scale))
-        SUB_SZ      = max(28, int(SUB_SZ    * scale))
-        ITEM_GAP    = max(4,  int(ITEM_GAP  * scale))
-        DIV_MARGIN_T = max(14, int(DIV_MARGIN_T * scale))
-        DIV_MARGIN_B = max(12, int(DIV_MARGIN_B * scale))
-
-        font_italic = _load_font(_SERIF_BOLD_ITALIC, ITALIC_SZ)
-        font_sub    = _load_font(_SANS_BOLD,         SUB_SZ)
-
-        segments = []
-        for seg_text, is_emp in runs:
-            if is_emp:
-                emp_max = max(40, int(160 * scale))
-                font    = _fit_font(draw, seg_text, max_w, max_size=emp_max, min_size=40)
-                lh      = _th(draw, seg_text, font)
-                segments.append({"text": seg_text, "font": font, "is_emp": True,
-                                  "lines": [seg_text], "line_h": lh, "seg_h": lh})
-            else:
-                wrapped = _wrap(draw, seg_text.strip(), font_italic, max_w)
-                lh      = _th(draw, wrapped[0], font_italic)
-                seg_h   = lh * len(wrapped) + LINE_GAP * max(0, len(wrapped) - 1)
-                segments.append({"text": seg_text, "font": font_italic, "is_emp": False,
-                                  "lines": wrapped, "line_h": lh, "seg_h": seg_h})
-
-        sub_lines  = _wrap(draw, subtext, font_sub, max_w)
-        sub_line_h = _th(draw, sub_lines[0], font_sub)
-        sub_blk_h  = sub_line_h * len(sub_lines) + SUB_LINE_GAP * max(0, len(sub_lines) - 1)
-        hl_blk_h   = (sum(s["seg_h"] for s in segments)
-                      + ITEM_GAP * max(0, len(segments) - 1))
-        total_h    = hl_blk_h + DIV_MARGIN_T + DIV_THICK + DIV_MARGIN_B + sub_blk_h
-
-    # ── Vertical center ───────────────────────────────────────────────────────
-    y = max(pad + 6, (top_h - total_h) // 2)   # +6 for accent bar clearance
-
-    # ── Render headline segments ──────────────────────────────────────────────
-    for i, seg in enumerate(segments):
-        for j, line in enumerate(seg["lines"]):
-            if seg["is_emp"]:
-                _draw_letter_spaced(draw, cx, y, line, seg["font"],
-                                    text_color, spacing=EMP_SPACING,
-                                    shadow_offset=4, shadow_alpha=120)
-                y += seg["line_h"]
-            else:
-                _draw_text_centered(draw, cx, y, line, seg["font"],
-                                    text_color, shadow_offset=2, shadow_alpha=90)
-                y += seg["line_h"]
-            if j < len(seg["lines"]) - 1:
-                y += LINE_GAP
-        if i < len(segments) - 1:
-            y += ITEM_GAP
-
-    # ── Divider ───────────────────────────────────────────────────────────────
-    y += DIV_MARGIN_T
-    # Slightly inset divider with rounded-ish feel via two-layer draw
-    draw.line([(pad, y), (canvas_w - pad, y)],
-              fill=(0, 0, 0, 60), width=DIV_THICK + 2)          # soft shadow line
-    draw.line([(pad, y), (canvas_w - pad, y)],
-              fill=divider_color,  width=DIV_THICK)
-    y += DIV_THICK + DIV_MARGIN_B
-
-    # ── Subtext ───────────────────────────────────────────────────────────────
-    for j, line in enumerate(sub_lines):
-        _draw_text_centered(draw, cx, y, line, font_sub,
-                            subtext_color, shadow_offset=2, shadow_alpha=80)
-        y += sub_line_h
-        if j < len(sub_lines) - 1:
-            y += SUB_LINE_GAP
-
-    # ── Convert to RGB and save ───────────────────────────────────────────────
-    out_img = canvas.convert("RGB")
-    out     = io.BytesIO()
-    out_img.save(out, format="PNG", optimize=True)
-    return out.getvalue()
+    style = layout.get("layout_style", "dark_panel_top")
+    if style == "photo_top":
+        return _layout_photo_top(photo_bytes, layout, canvas_w, canvas_h)
+    if style == "full_bleed":
+        return _layout_full_bleed(photo_bytes, layout, canvas_w, canvas_h)
+    return _layout_dark_panel_top(photo_bytes, layout, canvas_w, canvas_h)

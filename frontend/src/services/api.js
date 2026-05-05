@@ -134,6 +134,25 @@ async function requestBlob(endpoint) {
   return res.blob();
 }
 
+async function requestFormData(endpoint, formData) {
+  const token = localStorage.getItem("token");
+  // Do NOT set Content-Type — browser sets multipart/form-data with boundary automatically
+  const res = await fetch(`${API_BASE}${endpoint}`, {
+    method: "POST",
+    headers: { ...(token && { Authorization: `Bearer ${token}` }) },
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const msg = Array.isArray(err.detail)
+      ? err.detail.map((d) => (d.msg || String(d))).join("\n")
+      : (err.detail || `HTTP ${res.status}`);
+    throw new Error(msg);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
 // ─── M2: Auth ────────────────────────────────────────────────────────────────
 
 // company and role are verified by the backend against the DB on every login.
@@ -708,6 +727,32 @@ export const adsAPI = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  // ── Bulk Calling Campaigns ────────────────────────────────────────────────
+  // formData must include: name (string), file (CSV File), concurrency (int), per_minute (int)
+  createVoiceCampaign: (adId, formData) =>
+    requestFormData(`/advertisements/${adId}/voice-campaigns`, formData),
+
+  listVoiceCampaigns: (adId) =>
+    request(`/advertisements/${adId}/voice-campaigns`),
+
+  getVoiceCampaign: (adId, campaignId) =>
+    request(`/advertisements/${adId}/voice-campaigns/${campaignId}`),
+
+  startVoiceCampaign: (adId, campaignId) =>
+    request(`/advertisements/${adId}/voice-campaigns/${campaignId}/start`, { method: "POST" }),
+
+  pauseVoiceCampaign: (adId, campaignId) =>
+    request(`/advertisements/${adId}/voice-campaigns/${campaignId}/pause`, { method: "POST" }),
+
+  cancelVoiceCampaign: (adId, campaignId) =>
+    request(`/advertisements/${adId}/voice-campaigns/${campaignId}/cancel`, { method: "POST" }),
+
+  getCampaignRecords: (adId, campaignId, status = null, limit = 200) => {
+    const params = new URLSearchParams({ limit });
+    if (status) params.set("status", status);
+    return request(`/advertisements/${adId}/voice-campaigns/${campaignId}/records?${params}`);
+  },
 
   // ── Meta Ad Management ────────────────────────────────────────────────────
   // List live ads for a campaign (fetched from Meta API)

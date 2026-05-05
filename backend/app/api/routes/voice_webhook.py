@@ -164,4 +164,12 @@ async def elevenlabs_webhook(
     except Exception as exc:
         # Log but don't raise — always return 204 to prevent ElevenLabs retries
         logger.error("Failed to store ElevenLabs webhook for conv %s: %s", conversation_id, exc, exc_info=True)
+
+    # Link outcome to bulk campaign CallRecord if this was a campaign-initiated call
+    try:
+        from app.services.voice.campaign_worker import mark_record_outcome
+        await mark_record_outcome(conversation_id, call_status)
+    except Exception as exc:
+        logger.warning("Failed to mark campaign record outcome for conv %s: %s", conversation_id, exc)
+
     return  # 204

@@ -1,17 +1,20 @@
 """
-Voice agent routes: provision, status, outbound calls, transcripts, conversations.
+Voice agent routes: provision, status, outbound calls, transcripts, conversations,
+and bulk calling campaigns.
 """
 
+import csv
+import io
 import logging
 import re
 from datetime import datetime, date, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, field_validator
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -19,8 +22,9 @@ from app.core.security import require_roles
 from app.db.database import get_db
 from app.models.models import Advertisement, User, UserRole
 from app.models.survey import Appointment
-from app.models.voice import VoiceSession
+from app.models.voice import CallCampaign, CallRecord, VoiceSession
 from app.services.ai.voicebot_agent import VoicebotAgentService
+from app.services.voice.campaign_worker import start_worker
 from app.api.routes.bookings import _booking_config, _campaign_window, _generate_slots
 
 router = APIRouter(prefix="/advertisements", tags=["Voice Agent"])
@@ -560,3 +564,320 @@ async def delete_voice_agent(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"status": "deleted"}
+
+
+# ── Bulk Calling Campaigns ────────────────────────────────────────────────────
+
+_E164_RE = re.compile(r"^\+\d{7,15}$")
+
+
+def _clean_phone(raw: str) -> Optional[str]:
+    """Strip common formatting and validate E.164. Returns None if invalid."""
+    s = raw.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    if not s.startswith("+"):
+        s = "+" + s
+    return s if _E164_RE.match(s) else None
+
+
+def _campaign_dict(c: CallCampaign) -> Dict[str, Any]:
+    return {
+        "id":            c.id,
+        "name":          c.name,
+        "status":        c.status,
+        "total":         c.total,
+        "completed":     c.completed,
+        "failed_count":  c.failed_count,
+        "concurrency":   c.concurrency,
+        "per_minute":    c.per_minute,
+        "created_at":    c.created_at.isoformat() if c.created_at else None,
+        "started_at":    c.started_at.isoformat()  if c.started_at  else None,
+        "finished_at":   c.finished_at.isoformat() if c.finished_at else None,
+    }
+
+
+def _parse_upload_rows(content: bytes, filename: str) -> tuple[list[tuple[str, Optional[str]]], int]:
+    """
+    Parse a CSV, XLSX, or XLS file and return (records, skipped_count).
+    Raises HTTPException on format errors.
+    """
+    fname = (filename or "").lower()
+
+    if fname.endswith(".xlsx"):
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+            ws = wb.active
+            rows_iter = ws.iter_rows(values_only=True)
+            header = [str(c).lower().strip() if c is not None else "" for c in next(rows_iter, [])]
+        except Exception:
+            raise HTTPException(status_code=400, detail="Could not parse XLSX file")
+    elif fname.endswith(".xls"):
+        try:
+            import xlrd
+            wb = xlrd.open_workbook(file_contents=content)
+            ws = wb.sheet_by_index(0)
+            header = [str(ws.cell_value(0, c)).lower().strip() for c in range(ws.ncols)]
+            rows_iter = (
+                tuple(ws.cell_value(r, c) for c in range(ws.ncols))
+                for r in range(1, ws.nrows)
+            )
+        except Exception:
+            raise HTTPException(status_code=400, detail="Could not parse XLS file")
+    else:
+        # CSV (default)
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=400, detail="File must be UTF-8 encoded CSV")
+        reader = csv.DictReader(io.StringIO(text))
+        header = [f.lower().strip() for f in (reader.fieldnames or [])]
+        if "phone" not in header:
+            raise HTTPException(status_code=400, detail="File must contain a 'phone' column")
+        fieldnames_raw = reader.fieldnames or []
+        phone_col = next(f for f in fieldnames_raw if f.lower().strip() == "phone")
+        name_col  = next((f for f in fieldnames_raw if f.lower().strip() == "name"), None)
+        records_data: list[tuple[str, Optional[str]]] = []
+        skipped = 0
+        for row in reader:
+            if len(records_data) >= 5000:
+                raise HTTPException(status_code=400, detail="File exceeds 5 000 row limit")
+            phone = _clean_phone(row.get(phone_col, ""))
+            if not phone:
+                skipped += 1
+                continue
+            contact = row.get(name_col, "").strip() if name_col else None
+            records_data.append((phone, contact or None))
+        return records_data, skipped
+
+    # Shared path for XLSX / XLS
+    if "phone" not in header:
+        raise HTTPException(status_code=400, detail="File must contain a 'phone' column")
+    phone_idx = header.index("phone")
+    name_idx  = header.index("name") if "name" in header else None
+
+    records_data = []
+    skipped = 0
+    for row in rows_iter:
+        if len(records_data) >= 5000:
+            raise HTTPException(status_code=400, detail="File exceeds 5 000 row limit")
+        raw_phone = str(row[phone_idx]) if phone_idx < len(row) and row[phone_idx] is not None else ""
+        # Excel sometimes stores numbers as floats (e.g. 61412345678.0) — strip the .0
+        if raw_phone.endswith(".0"):
+            raw_phone = raw_phone[:-2]
+        phone = _clean_phone(raw_phone)
+        if not phone:
+            skipped += 1
+            continue
+        contact = str(row[name_idx]).strip() if name_idx is not None and name_idx < len(row) and row[name_idx] else None
+        records_data.append((phone, contact or None))
+    return records_data, skipped
+
+
+@router.post("/{ad_id}/voice-campaigns")
+async def create_voice_campaign(
+    ad_id: str,
+    name: str = Form(...),
+    concurrency: int = Form(2),
+    per_minute: int = Form(20),
+    file: UploadFile = File(...),
+    user: User = Depends(require_roles([UserRole.PUBLISHER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Upload a CSV, XLSX, or XLS file of phone numbers and create a bulk calling campaign.
+    File must have a 'phone' column (E.164 format). Optional 'name' column.
+    Campaign starts in 'queued' status — call /start to begin dialling.
+    """
+    # Verify ad belongs to user's company
+    ad_row = await db.execute(
+        select(Advertisement).where(
+            Advertisement.id == ad_id,
+            Advertisement.company_id == user.company_id,
+        )
+    )
+    if not ad_row.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Advertisement not found")
+
+    # Validate settings
+    if not (1 <= concurrency <= 10):
+        raise HTTPException(status_code=400, detail="concurrency must be 1–10")
+    if not (1 <= per_minute <= 60):
+        raise HTTPException(status_code=400, detail="per_minute must be 1–60")
+
+    fname = file.filename or ""
+    if not any(fname.lower().endswith(ext) for ext in (".csv", ".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="File must be a .csv, .xlsx, or .xls file")
+
+    content = await file.read()
+    records_data, skipped = _parse_upload_rows(content, fname)
+
+    if not records_data:
+        raise HTTPException(status_code=400, detail="No valid E.164 phone numbers found in file")
+
+    campaign = CallCampaign(
+        advertisement_id=ad_id,
+        name=name.strip(),
+        status="queued",
+        total=len(records_data),
+        concurrency=concurrency,
+        per_minute=per_minute,
+    )
+    db.add(campaign)
+    await db.flush()  # populate campaign.id
+
+    for phone, contact_name in records_data:
+        db.add(CallRecord(
+            campaign_id=campaign.id,
+            advertisement_id=ad_id,
+            phone_e164=phone,
+            contact_name=contact_name,
+        ))
+    await db.commit()
+    await db.refresh(campaign)
+
+    return {
+        "campaign": _campaign_dict(campaign),
+        "skipped": skipped,
+        "message": f"Campaign created with {len(records_data)} numbers ({skipped} skipped).",
+    }
+
+
+@router.post("/{ad_id}/voice-campaigns/{campaign_id}/start")
+async def start_voice_campaign(
+    ad_id: str,
+    campaign_id: str,
+    user: User = Depends(require_roles([UserRole.PUBLISHER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Start or resume a queued/paused campaign."""
+    campaign = await _get_campaign(db, ad_id, campaign_id, user)
+    if campaign.status not in ("queued", "paused"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot start a campaign with status '{campaign.status}'",
+        )
+    campaign.status = "running"
+    campaign.started_at = campaign.started_at or datetime.utcnow()
+    await db.commit()
+    start_worker(campaign_id)
+    return {"status": "running", "campaign_id": campaign_id}
+
+
+@router.post("/{ad_id}/voice-campaigns/{campaign_id}/pause")
+async def pause_voice_campaign(
+    ad_id: str,
+    campaign_id: str,
+    user: User = Depends(require_roles([UserRole.PUBLISHER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pause a running campaign. In-flight dials complete; no new dials start."""
+    campaign = await _get_campaign(db, ad_id, campaign_id, user)
+    if campaign.status != "running":
+        raise HTTPException(status_code=400, detail="Campaign is not running")
+    campaign.status = "paused"
+    await db.commit()
+    return {"status": "paused", "campaign_id": campaign_id}
+
+
+@router.post("/{ad_id}/voice-campaigns/{campaign_id}/cancel")
+async def cancel_voice_campaign(
+    ad_id: str,
+    campaign_id: str,
+    user: User = Depends(require_roles([UserRole.PUBLISHER])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cancel a campaign. Pending records are left as-is (not dialled)."""
+    campaign = await _get_campaign(db, ad_id, campaign_id, user)
+    if campaign.status in ("done", "cancelled"):
+        raise HTTPException(status_code=400, detail=f"Campaign already {campaign.status}")
+    campaign.status = "cancelled"
+    campaign.finished_at = datetime.utcnow()
+    await db.commit()
+    return {"status": "cancelled", "campaign_id": campaign_id}
+
+
+@router.get("/{ad_id}/voice-campaigns")
+async def list_voice_campaigns(
+    ad_id: str,
+    user: User = Depends(require_roles([UserRole.PUBLISHER, UserRole.STUDY_COORDINATOR])),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all bulk calling campaigns for this advertisement."""
+    result = await db.execute(
+        select(CallCampaign)
+        .where(CallCampaign.advertisement_id == ad_id)
+        .order_by(CallCampaign.created_at.desc())
+    )
+    campaigns = result.scalars().all()
+    return {"campaigns": [_campaign_dict(c) for c in campaigns]}
+
+
+@router.get("/{ad_id}/voice-campaigns/{campaign_id}")
+async def get_voice_campaign(
+    ad_id: str,
+    campaign_id: str,
+    user: User = Depends(require_roles([UserRole.PUBLISHER, UserRole.STUDY_COORDINATOR])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get status and counters for a single campaign."""
+    campaign = await _get_campaign(db, ad_id, campaign_id, user)
+    return {"campaign": _campaign_dict(campaign)}
+
+
+@router.get("/{ad_id}/voice-campaigns/{campaign_id}/records")
+async def get_campaign_records(
+    ad_id: str,
+    campaign_id: str,
+    status: Optional[str] = Query(None, description="Filter by status"),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_roles([UserRole.PUBLISHER, UserRole.STUDY_COORDINATOR])),
+    db: AsyncSession = Depends(get_db),
+):
+    """Paginated list of call records within a campaign, optionally filtered by status."""
+    await _get_campaign(db, ad_id, campaign_id, user)  # ownership check
+
+    q = select(CallRecord).where(CallRecord.campaign_id == campaign_id)
+    if status:
+        q = q.where(CallRecord.status == status)
+    q = q.order_by(CallRecord.created_at).offset(offset).limit(limit)
+    result = await db.execute(q)
+    records = result.scalars().all()
+
+    return {
+        "records": [
+            {
+                "id":              r.id,
+                "phone_e164":      r.phone_e164,
+                "contact_name":    r.contact_name,
+                "status":          r.status,
+                "attempts":        r.attempts,
+                "conversation_id": r.conversation_id,
+                "last_error":      r.last_error,
+                "called_at":       r.called_at.isoformat() if r.called_at else None,
+            }
+            for r in records
+        ]
+    }
+
+
+async def _get_campaign(
+    db: AsyncSession,
+    ad_id: str,
+    campaign_id: str,
+    user: User,
+) -> CallCampaign:
+    """Fetch a campaign and verify it belongs to ad_id (which belongs to user's company)."""
+    result = await db.execute(
+        select(CallCampaign)
+        .join(Advertisement, Advertisement.id == CallCampaign.advertisement_id)
+        .where(
+            CallCampaign.id == campaign_id,
+            CallCampaign.advertisement_id == ad_id,
+            Advertisement.company_id == user.company_id,
+        )
+    )
+    campaign = result.scalar_one_or_none()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return campaign

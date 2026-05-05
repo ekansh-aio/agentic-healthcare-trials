@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     ELEVENLABS_FLASH_MODEL: str = "eleven_flash_v2"
     # Expressive model: richer emotional delivery — used for the continuation.
     # Supports <laugh>, <sigh>, <break> and other audio tags.
-    ELEVENLABS_EXPRESSIVE_MODEL: str = "eleven_v3"
+    ELEVENLABS_EXPRESSIVE_MODEL: str = "eleven_v3_conversational"
     # Word count range for the flash opener before handing off to expressive model
     FUSION_OPENER_MIN_WORDS: int = 8
     FUSION_OPENER_MAX_WORDS: int = 18

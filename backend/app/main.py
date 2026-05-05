@@ -19,6 +19,7 @@ from app.api.routes import hybrid_voice_session
 from app.api.routes.advertisements import routers as _ad_routers
 from app.core.config import settings
 from app.services.meta_scheduler import run_pause_scheduler
+from app.services.voice.campaign_worker import resume_running_campaigns, run_stale_sweeper
 
 
 async def _security_headers(request: Request, call_next):
@@ -52,13 +53,16 @@ async def lifespan(app: FastAPI):
     os.makedirs(os.path.join(settings.UPLOAD_DIR, "docs"), exist_ok=True)
     os.makedirs(settings.OUTPUT_DIR, exist_ok=True)
     scheduler_task = asyncio.create_task(run_pause_scheduler())
+    sweeper_task   = asyncio.create_task(run_stale_sweeper())
+    await resume_running_campaigns()
     yield
-    # Shutdown — cancel background scheduler gracefully
-    scheduler_task.cancel()
-    try:
-        await scheduler_task
-    except asyncio.CancelledError:
-        pass
+    # Shutdown — cancel background tasks gracefully
+    for t in (scheduler_task, sweeper_task):
+        t.cancel()
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(

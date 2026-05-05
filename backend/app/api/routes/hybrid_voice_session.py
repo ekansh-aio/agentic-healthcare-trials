@@ -1,21 +1,25 @@
 """
 Hybrid Voice Session — custom WebSocket conversation pipeline.
 
-Model: eleven_flash_v2_5 throughout (<100ms TTFB).
-Expressiveness comes from literal vocal disfluencies ("umm", "ah", "hmm")
-injected by the LLM via system-prompt instructions — no audio tags needed.
+TTS strategy (single-model per utterance — no ensemble):
+  • Fillers  → eleven_flash_v2          (~75 ms TTFB, buffered, short phrases)
+  • Greeting → eleven_flash_v2          (fast start when patient connects)
+  • Responses→ eleven_v3_conversational (EL streaming WS, first chunk ~200 ms
+                                         after first LLM token — snappy gap)
 
-Pipeline per turn:
-  1. Browser sends PCM audio (16 000 Hz, 16-bit mono)
-  2. Server-side VAD detects end of speech (RMS silence threshold)
-  3. ── IMMEDIATELY ── synthesise a short thinking filler ("Hmm...", "Ah...")
-     and stream it to the browser while steps 4–5 run in the background
-  4. ElevenLabs ASR transcribes the buffered audio
-  5. Claude generates the response (disfluencies baked into the system prompt)
-  6. Flash TTS streams the response — browser plays it right after the filler
+Why no ensemble: TTS models generate prosody from their full input text.
+Splitting a response across two separate synthesis calls produces an audible
+acoustic seam — the first model synthesises a speech-FINAL ending, the second
+starts with speech-INITIAL energy. Single-model synthesis gives naturally
+consistent prosody throughout.
 
-This means the user hears the agent "thinking" within ~75ms of finishing
-their sentence, eliminating the dead-air gap caused by ASR + LLM latency.
+Streaming pipeline (per turn):
+  1. VAD triggers → Flash filler fires (~75 ms) + ASR starts in parallel.
+  2. Filler audio streams to browser; ASR transcribes (~400 ms).
+  3. Claude streaming API starts; tokens flow to ElevenLabs streaming WS.
+  4. ElevenLabs emits audio chunks ~200 ms after first tokens arrive.
+  5. Audio chunks forwarded to browser as they arrive.
+  Gap = filler_end (~975 ms) – first_v3_chunk (~900 ms) ≈ 0 ms overlap.
 
 Wire protocol
 ─────────────
@@ -24,10 +28,10 @@ Browser → Backend  (text/JSON):   {"type": "interrupt"}
 
 Backend → Browser  (binary):      Raw PCM 16 000 Hz 16-bit LE mono
 Backend → Browser  (text/JSON):
-    {"type": "session_ready", "first_message": "...", "voice_id": "..."}
+    {"type": "session_ready", "first_message": "...", "voice_id": "...", "voice_name": "..."}
     {"type": "transcript",    "role": "user",  "text": "..."}
-    {"type": "agent_start",   "text": "..."}
-    {"type": "agent_end"}
+    {"type": "agent_start"}
+    {"type": "agent_end",     "text": "..."}
     {"type": "error",         "detail": "..."}
 
 Authentication: pass JWT as ?token=<jwt> query param.
@@ -36,6 +40,7 @@ Authentication: pass JWT as ?token=<jwt> query param.
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import json
 import logging
@@ -45,6 +50,7 @@ import struct
 from typing import Optional
 
 import httpx
+import websockets as _ws_lib
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,25 +68,39 @@ from app.models.models import (
     VoiceSession,
 )
 from app.services.ai.voicebot_agent import AUSTRALIAN_VOICES, _voice_for_style
-from app.services.ai.fusion_tts import normalize_pcm, pcm_to_wav, _fetch_tts_pcm, stream_fusion_tts
+from app.services.ai.fusion_tts import normalize_pcm, pcm_to_wav, _fetch_tts_pcm
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-ELEVENLABS_ASR_URL = "https://api.elevenlabs.io/v1/speech-to-text"
-FLASH_MODEL = settings.ELEVENLABS_FLASH_MODEL   # "eleven_flash_v2"
-SAMPLE_RATE = 16_000                             # Hz — browser must capture at this rate
+ELEVENLABS_ASR_URL   = "https://api.elevenlabs.io/v1/speech-to-text"
+_ELEVENLABS_TTS_URL  = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
+_EL_STREAM_WS_URL    = (
+    "wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream-input"
+    "?model_id={model_id}&output_format=pcm_16000&xi_api_key={api_key}"
+)
 
-# Fillers the agent uses while "thinking" (played during ASR + LLM latency window)
-# Kept very short so they finish before the actual response is ready.
+FLASH_MODEL      = settings.ELEVENLABS_FLASH_MODEL        # eleven_flash_v2
+EXPRESSIVE_MODEL = settings.ELEVENLABS_EXPRESSIVE_MODEL   # eleven_v3_conversational
+SAMPLE_RATE      = 16_000
+
+_VOICE_SETTINGS = {
+    "stability": 0.55,
+    "similarity_boost": 0.82,
+    "style": 0.35,
+    "use_speaker_boost": False,
+}
+
+# 2-word fillers (~900 ms each) — long enough to cover ASR + LLM + v3 TTFB.
+# Flash synthesises them in ~75 ms so the browser hears something immediately.
 _THINKING_FILLERS = [
-    "Hmm...",
-    "Ah...",
-    "Mmm...",
-    "Right...",
-    "Umm...",
-    "Oh...",
+    "Hmm, sure.",
+    "Ah, right.",
+    "Mmm, okay.",
+    "Right, sure.",
+    "Of course.",
+    "Absolutely.",
 ]
 
 
@@ -140,23 +160,121 @@ async def _generate_response(system_prompt: str, history: list[dict]) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Flash TTS helpers
+# TTS helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _synth_flash(text: str, voice_id: str) -> bytes:
-    """Synthesise text with eleven_flash_v2_5 and return normalised PCM."""
+    """Synthesise a short phrase with Flash and return normalised PCM (buffered)."""
     pcm = await _fetch_tts_pcm(text, voice_id, FLASH_MODEL)
     return normalize_pcm(pcm)
 
 
-async def _stream_flash(text: str, voice_id: str, websocket: WebSocket, chunk: int = 4096) -> None:
-    """Synthesise and stream flash TTS to the browser. Swallows errors gracefully."""
-    try:
-        audio = await _synth_flash(text, voice_id)
-        for i in range(0, len(audio), chunk):
-            await websocket.send_bytes(audio[i : i + chunk])
-    except Exception as exc:
-        logger.warning("Flash TTS stream error: %s", exc)
+async def _stream_tts_to_ws(
+    text: str,
+    voice_id: str,
+    model_id: str,
+    websocket: WebSocket,
+    chunk_size: int = 4096,
+) -> None:
+    """
+    Stream ElevenLabs TTS PCM chunks directly to the browser as they arrive.
+
+    The browser's AudioContext schedules each arriving chunk immediately after
+    the previous one via schedRef — there is no gap within a response because
+    all chunks come from a single synthesis call (consistent prosody throughout).
+    """
+    if not text.strip():
+        return
+    url = _ELEVENLABS_TTS_URL.format(voice_id=voice_id)
+    payload = {"text": text, "model_id": model_id, "voice_settings": _VOICE_SETTINGS}
+    headers = {
+        "xi-api-key": settings.ELEVENLABS_API_KEY or "",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        async with client.stream(
+            "POST", url,
+            json=payload,
+            headers=headers,
+            params={"output_format": "pcm_16000"},
+        ) as resp:
+            if not resp.is_success:
+                body = await resp.aread()
+                raise ValueError(
+                    f"ElevenLabs TTS [{model_id}] {resp.status_code}: "
+                    f"{body.decode(errors='replace')}"
+                )
+            async for chunk in resp.aiter_bytes(chunk_size):
+                if chunk:
+                    await websocket.send_bytes(chunk)
+
+
+async def _stream_llm_tts_pipeline(
+    system_prompt: str,
+    history: list[dict],
+    voice_id: str,
+    websocket: WebSocket,
+) -> str:
+    """
+    Pipeline: Claude streaming tokens → ElevenLabs streaming WS → browser.
+
+    ElevenLabs starts emitting audio ~200 ms after the first tokens arrive,
+    so the first chunk reaches the browser before the filler finishes playing —
+    the gap between filler end and response start collapses to near zero.
+
+    Returns the full agent text for appending to history.
+    """
+    url = _EL_STREAM_WS_URL.format(
+        voice_id=voice_id,
+        model_id=EXPRESSIVE_MODEL,
+        api_key=settings.ELEVENLABS_API_KEY or "",
+    )
+    full_text = ""
+
+    async with _ws_lib.connect(url) as el_ws:
+        # Initialise voice session with settings
+        await el_ws.send(json.dumps({"text": " ", "voice_settings": _VOICE_SETTINGS}))
+
+        async def _pipe_audio() -> None:
+            """Forward ElevenLabs audio chunks to the browser as they arrive."""
+            try:
+                while True:
+                    raw = await el_ws.recv()
+                    data = json.loads(raw)
+                    if data.get("audio"):
+                        await websocket.send_bytes(base64.b64decode(data["audio"]))
+                    if data.get("isFinal"):
+                        return
+            except Exception:
+                pass
+
+        audio_task = asyncio.create_task(_pipe_audio())
+
+        client   = get_async_client()
+        model_id = get_model()
+        try:
+            async with client.messages.stream(
+                model=model_id,
+                max_tokens=512,
+                system=system_prompt,
+                messages=history,
+            ) as stream:
+                async for chunk in stream.text_stream:
+                    full_text += chunk
+                    await el_ws.send(json.dumps({"text": chunk}))
+        except Exception as exc:
+            logger.error("LLM stream error: %s", exc)
+            audio_task.cancel()
+            return full_text
+
+        # Signal ElevenLabs to flush and close
+        await el_ws.send(json.dumps({"text": " ", "flush": True}))
+        try:
+            await asyncio.wait_for(audio_task, timeout=30.0)
+        except asyncio.TimeoutError:
+            logger.warning("TTS pipeline audio drain timed out")
+
+    return full_text
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -167,7 +285,7 @@ async def _create_voice_session(db: AsyncSession, advertisement_id: str) -> Voic
     session = VoiceSession(
         advertisement_id=advertisement_id,
         status="active",
-        caller_metadata={"type": "inbound", "source": "browser_flash"},
+        caller_metadata={"type": "inbound", "source": "browser_hybrid"},
     )
     db.add(session)
     await db.commit()
@@ -198,19 +316,22 @@ async def _finalise_session(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.websocket("/advertisements/{advertisement_id}/voice/ws")
-async def flash_voice_ws(
+async def hybrid_voice_ws(
     websocket: WebSocket,
     advertisement_id: str,
     token: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Full-duplex voice session using eleven_flash_v2_5 + vocal disfluency fillers.
+    Full-duplex voice session.
 
-    Instant filler flow:
-      VAD triggers → immediately synthesise "Hmm..." / "Ah..." (≈75ms) and
-      stream it while ASR + LLM run in the background. Agent sounds like it's
-      thinking rather than frozen. Actual response follows seamlessly.
+    Per-turn flow:
+      1. VAD detects end of speech
+      2. Flash filler fires immediately (~75 ms) — patient hears the agent "thinking"
+      3. ASR transcribes the buffered audio (runs in parallel with filler)
+      4. Claude generates the full response
+      5. v3_conversational streams the response chunk-by-chunk to the browser
+         (single synthesis call → consistent prosody, no acoustic seams)
     """
     # ── Auth ──────────────────────────────────────────────────────────────────
     if not token:
@@ -242,11 +363,13 @@ async def flash_voice_ws(
     publisher_voice_id = bot_config.get("voice_id")
     if publisher_voice_id:
         matched_profile = next(
-            (v for v in AUSTRALIAN_VOICES if v["id"] == publisher_voice_id),
-            None,
+            (v for v in AUSTRALIAN_VOICES if v["id"] == publisher_voice_id), None
         )
         voice_id = publisher_voice_id
-        voice_name = matched_profile["name"] if matched_profile else bot_config.get("bot_name", "Assistant")
+        voice_name = (
+            matched_profile["name"] if matched_profile
+            else bot_config.get("bot_name", "Assistant")
+        )
     else:
         profile = _voice_for_style(bot_config.get("conversation_style", "warm"))
         voice_id = profile["id"]
@@ -263,7 +386,6 @@ async def flash_voice_ws(
     )
     first_message = bot_config.get("first_message") or default_first_message
 
-    # Build system prompt (reuses voicebot_agent logic — disfluencies already baked in)
     from app.services.ai.voicebot_agent import VoicebotAgentService
     svc = VoicebotAgentService(db)
     system_prompt = await svc._build_system_prompt(ad, allow_audio_tags=True)
@@ -271,19 +393,26 @@ async def flash_voice_ws(
     # ── Session ───────────────────────────────────────────────────────────────
     voice_session = await _create_voice_session(db, advertisement_id)
 
-    # ── Greet ─────────────────────────────────────────────────────────────────
+    # ── Greet — Flash for fast first impression ───────────────────────────────
     await websocket.send_text(json.dumps({
         "type": "session_ready",
         "first_message": first_message,
         "voice_id": voice_id,
         "voice_name": voice_name,
     }))
-    await websocket.send_text(json.dumps({"type": "agent_start", "text": first_message}))
-    async for pcm_chunk in stream_fusion_tts(first_message, voice_id):
-        await websocket.send_bytes(pcm_chunk)
-    await websocket.send_text(json.dumps({"type": "agent_end"}))
+    await websocket.send_text(json.dumps({"type": "agent_start"}))
+    try:
+        await _stream_tts_to_ws(first_message, voice_id, FLASH_MODEL, websocket)
+    except Exception as exc:
+        logger.warning("Greeting TTS failed: %s", exc)
+    await websocket.send_text(json.dumps({"type": "agent_end", "text": first_message}))
 
-    history: list[dict] = [{"role": "assistant", "content": first_message}]
+    # History must start with a user message (Anthropic API requirement).
+    # The synthetic "[call started]" seeds proper user/assistant alternation.
+    history: list[dict] = [
+        {"role": "user",      "content": "[call started]"},
+        {"role": "assistant", "content": first_message},
+    ]
 
     # ── VAD state ─────────────────────────────────────────────────────────────
     rms_threshold = float(settings.FUSION_VAD_RMS_THRESHOLD)
@@ -298,7 +427,6 @@ async def flash_voice_ws(
         while True:
             message = await websocket.receive()
 
-            # Control frame
             if message.get("type") == "websocket.receive" and "text" in message:
                 try:
                     ctrl = json.loads(message["text"])
@@ -325,7 +453,7 @@ async def flash_voice_ws(
                 speech_buffer.extend(raw)
             else:
                 if not speech_detected:
-                    continue  # pre-speech silence — ignore
+                    continue
 
                 silence_samples += len(raw) // 2
                 speech_buffer.extend(raw)
@@ -342,69 +470,59 @@ async def flash_voice_ws(
                 if len(pcm_snapshot) < SAMPLE_RATE // 4:
                     continue  # < 250 ms — noise burst, skip
 
-                # Step 1: launch thinking filler TTS and ASR in parallel.
-                # The filler (~75ms) bridges the dead-air window while ASR
-                # (~300–500ms) and LLM (~200–400ms) do their work.
+                # Step 1: filler (Flash, ~75 ms TTFB) + ASR run in parallel.
                 filler_text = random.choice(_THINKING_FILLERS)
                 filler_task = asyncio.create_task(
-                    _synth_flash(filler_text, voice_id),
-                    name="filler_tts",
+                    _synth_flash(filler_text, voice_id), name="filler_tts"
                 )
                 asr_task = asyncio.create_task(
-                    _transcribe(pcm_snapshot),
-                    name="asr",
+                    _transcribe(pcm_snapshot), name="asr"
                 )
 
-                # Step 2: stream filler as soon as it's ready
+                # Step 2: send filler to browser as soon as it's synthesised.
                 try:
                     filler_audio = await asyncio.wait_for(filler_task, timeout=3.0)
-                    chunk_size = 4096
-                    for i in range(0, len(filler_audio), chunk_size):
-                        await websocket.send_bytes(filler_audio[i : i + chunk_size])
+                    for i in range(0, len(filler_audio), 4096):
+                        await websocket.send_bytes(filler_audio[i : i + 4096])
                 except Exception as exc:
                     logger.warning("Filler TTS failed: %s", exc)
 
-                # Step 3: wait for transcript
+                # Step 3: transcript
                 transcript = await asr_task
                 if not transcript:
                     continue
 
                 logger.info("User: %s", transcript)
                 await websocket.send_text(json.dumps({
-                    "type": "transcript",
-                    "role": "user",
-                    "text": transcript,
+                    "type": "transcript", "role": "user", "text": transcript,
                 }))
                 history.append({"role": "user", "content": transcript})
 
-                # Step 4: LLM response (Claude with disfluency-rich system prompt)
+                # Steps 4+5: LLM tokens stream directly into ElevenLabs WS TTS.
+                # First audio chunk reaches browser ~200 ms after first LLM token —
+                # before the filler finishes playing, so the gap is near zero.
+                await websocket.send_text(json.dumps({"type": "agent_start"}))
                 try:
-                    agent_text = await _generate_response(system_prompt, history)
+                    agent_text = await _stream_llm_tts_pipeline(
+                        system_prompt, history, voice_id, websocket
+                    )
                 except Exception as exc:
-                    logger.error("LLM error: %s", exc)
+                    logger.error("LLM/TTS pipeline error: %s", exc)
                     await websocket.send_text(json.dumps({
                         "type": "error", "detail": "Response generation failed"
                     }))
+                    history.append({"role": "assistant", "content": ""})
+                    await websocket.send_text(json.dumps({"type": "agent_end", "text": ""}))
                     continue
 
-                if not agent_text:
-                    continue
+                # Always append assistant turn to keep history alternating.
+                history.append({"role": "assistant", "content": agent_text or ""})
+                if agent_text:
+                    logger.info("Agent: %s", agent_text[:120])
 
-                history.append({"role": "assistant", "content": agent_text})
-                logger.info("Agent: %s", agent_text[:120])
-
-                # Step 5: stream fusion TTS response
-                # Opener (~first sentence) → flash (immediate, <100ms)
-                # Continuation → eleven_v3 (expressive, audio tags rendered)
                 await websocket.send_text(json.dumps({
-                    "type": "agent_start", "text": agent_text
+                    "type": "agent_end", "text": agent_text or ""
                 }))
-                try:
-                    async for pcm_chunk in stream_fusion_tts(agent_text, voice_id):
-                        await websocket.send_bytes(pcm_chunk)
-                except Exception as exc:
-                    logger.warning("Fusion TTS stream error: %s", exc)
-                await websocket.send_text(json.dumps({"type": "agent_end"}))
 
     except WebSocketDisconnect:
         logger.info("Voice session disconnected (ad=%s)", advertisement_id)

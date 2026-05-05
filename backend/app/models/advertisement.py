@@ -43,6 +43,7 @@ class Advertisement(Base):
     reinforcement_logs = relationship("ReinforcementLog", back_populates="advertisement")
     voice_sessions     = relationship("VoiceSession", back_populates="advertisement", cascade="all, delete-orphan")
     chat_sessions      = relationship("ChatSession", back_populates="advertisement", cascade="all, delete-orphan")
+    call_campaigns     = relationship("CallCampaign", back_populates="advertisement", cascade="all, delete-orphan")
     survey_responses   = relationship("SurveyResponse", back_populates="advertisement", cascade="all, delete-orphan")
     appointments       = relationship("Appointment", back_populates="advertisement", cascade="all, delete-orphan")
 

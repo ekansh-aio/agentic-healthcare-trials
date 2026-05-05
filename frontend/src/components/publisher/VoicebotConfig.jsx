@@ -5,6 +5,7 @@ import { hasType } from "./publisherUtils";
 import {
   Mic, PhoneCall, PhoneOff, Volume2, Radio, Zap,
   Sparkles, CheckCircle2, AlertCircle, MessageSquare, X, ChevronDown,
+  Upload, Play, Pause, StopCircle, Users,
 } from "lucide-react";
 
 export default function VoicebotConfig({ ad }) {
@@ -90,6 +91,18 @@ export default function VoicebotConfig({ ad }) {
     audio.onended = () => setPreviewingVoiceId(null);
   }, [previewingVoiceId]);
 
+  // ── Bulk campaigns ───────────────────────────────────────────────────────────
+  const [campaigns,          setCampaigns]          = useState([]);
+  const [uploadName,         setUploadName]         = useState("");
+  const [uploadFile,         setUploadFile]         = useState(null);
+  const [uploadConcurrency,  setUploadConcurrency]  = useState(2);
+  const [uploadPerMinute,    setUploadPerMinute]    = useState(20);
+  const [uploadError,        setUploadError]        = useState("");
+  const [uploading,          setUploading]          = useState(false);
+  const [expandedCampaignId, setExpandedCampaignId] = useState(null);
+  const [campaignRecords,    setCampaignRecords]    = useState({});
+  const fileInputRef = useRef(null);
+
   // ── Outbound phone call test ────────────────────────────────────────────────
   const [testPhone,       setTestPhone]       = useState("");
   const [testCallStatus,  setTestCallStatus]  = useState("idle"); // idle | calling | done | error
@@ -110,18 +123,19 @@ export default function VoicebotConfig({ ad }) {
     }
   };
 
-  // ── Live voice test session ─────────────────────────────────────────────────
-  const [callStatus,  setCallStatus]  = useState("idle"); // idle | connecting | connected
-  const [isSpeaking,  setIsSpeaking]  = useState(false);
-  const [callError,   setCallError]   = useState(null);
-  const wsRef        = useRef(null);
-  const ctxRef       = useRef(null);
-  const processorRef = useRef(null);
-  const streamRef    = useRef(null);
-  const schedRef     = useRef(0);
-  const sourcesRef   = useRef([]);
-  const closingRef   = useRef(false);
-  const isSpeakingRef = useRef(false);  // ref mirror of isSpeaking for use inside closures
+  // ── Live voice test session (hybrid pipeline) ──────────────────────────────
+  const [callStatus,    setCallStatus]    = useState("idle"); // idle | connecting | connected
+  const [isSpeaking,    setIsSpeaking]    = useState(false);
+  const [callError,     setCallError]     = useState(null);
+  const [liveTranscript, setLiveTranscript] = useState([]); // [{role, text}] built during call
+  const wsRef         = useRef(null);
+  const ctxRef        = useRef(null);
+  const processorRef  = useRef(null);
+  const streamRef     = useRef(null);
+  const schedRef      = useRef(0);
+  const sourcesRef    = useRef([]);
+  const closingRef    = useRef(false);
+  const isSpeakingRef = useRef(false);
 
   const stopAllSources = useCallback(() => {
     sourcesRef.current.forEach(s => { try { s.stop(); } catch {} });
@@ -151,15 +165,12 @@ export default function VoicebotConfig({ ad }) {
     cleanupCall();
   }, [cleanupCall]);
 
-  // Decode base64 PCM-16 chunk from ElevenLabs and schedule for playback
-  const playPCM = useCallback((b64) => {
+  // Schedule a raw PCM ArrayBuffer for gapless playback via Web Audio
+  const playRawPCM = useCallback((arrayBuffer) => {
     const ctx = ctxRef.current;
     if (!ctx) return;
     try {
-      const bin = atob(b64);
-      const u8  = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-      const i16 = new Int16Array(u8.buffer);
+      const i16 = new Int16Array(arrayBuffer);
       const f32 = new Float32Array(i16.length);
       for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768;
       const buf = ctx.createBuffer(1, f32.length, 16000);
@@ -184,18 +195,26 @@ export default function VoicebotConfig({ ad }) {
   }, []);
 
   const startCall = async () => {
-    setCallStatus("connecting"); setCallError(null);
+    setCallStatus("connecting");
+    setCallError(null);
+    setLiveTranscript([]);
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error("Microphone not available — this page must be served over HTTPS or localhost.");
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-      const { signed_url } = await adsAPI.getVoiceSessionToken(ad.id);
+
+      const token = localStorage.getItem("token") || "";
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${proto}//${window.location.host}/api/advertisements/${ad.id}/voice/ws?token=${encodeURIComponent(token)}`;
+
       const ctx = new AudioContext({ sampleRate: 16000 });
       ctxRef.current = ctx;
       closingRef.current = false;
-      const ws = new WebSocket(signed_url);
+
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = "arraybuffer";
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -210,36 +229,46 @@ export default function VoicebotConfig({ ad }) {
         muted.connect(ctx.destination);
         processor.onaudioprocess = (e) => {
           if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+          if (isSpeakingRef.current) return; // mic gate — don't echo during agent speech
           const f32 = e.inputBuffer.getChannelData(0);
           const i16 = new Int16Array(f32.length);
           for (let i = 0; i < f32.length; i++) i16[i] = Math.round(Math.max(-1, Math.min(1, f32[i])) * 32767);
-          const u8 = new Uint8Array(i16.buffer);
-          let b64 = "";
-          for (let i = 0; i < u8.length; i += 8192) b64 += String.fromCharCode(...u8.subarray(i, Math.min(i + 8192, u8.length)));
-          wsRef.current.send(JSON.stringify({ user_audio_chunk: btoa(b64) }));
+          wsRef.current.send(i16.buffer);
         };
       };
+
       ws.onmessage = (evt) => {
+        if (evt.data instanceof ArrayBuffer) {
+          playRawPCM(evt.data);
+          return;
+        }
         try {
           const msg = JSON.parse(evt.data);
-          if (msg.type === "audio" && msg.audio_event?.audio_base_64) playPCM(msg.audio_event.audio_base_64);
-          else if (msg.type === "interruption") { stopAllSources(); schedRef.current = ctxRef.current?.currentTime ?? 0; isSpeakingRef.current = false; setIsSpeaking(false); }
-          else if (msg.type === "ping") ws.send(JSON.stringify({ type: "pong", event_id: msg.ping_event?.event_id }));
+          if (msg.type === "transcript") {
+            setLiveTranscript(prev => [...prev, { role: msg.role, text: msg.text }]);
+          } else if (msg.type === "agent_end" && msg.text) {
+            setLiveTranscript(prev => [...prev, { role: "assistant", text: msg.text }]);
+          } else if (msg.type === "error") {
+            setCallError(msg.detail || "An error occurred.");
+          }
         } catch {}
       };
-      ws.onerror = () => { stopCall(); setCallError("Connection failed — check that the agent is provisioned and try again."); };
+
+      ws.onerror = () => { stopCall(); setCallError("Connection failed — please try again."); };
       ws.onclose = (evt) => {
-        if (!closingRef.current) { cleanupCall(); setCallStatus("idle"); if (evt.code !== 1000) setCallError(`Session closed (code ${evt.code}).`); }
+        if (!closingRef.current) {
+          cleanupCall();
+          setCallStatus("idle");
+          if (evt.code !== 1000) setCallError(`Session closed (code ${evt.code}).`);
+        }
         closingRef.current = false;
       };
     } catch (err) {
-      cleanupCall(); setCallStatus("idle");
-      if (err.message?.includes("No ElevenLabs agent provisioned") || err.message?.includes("No voice agent provisioned") || err.message?.includes("agent provisioned")) {
-        setAgentStatus({ provisioned: false });
-        setCallError("Agent is not provisioned — click Provision Agent to set it up.");
-      } else {
-        setCallError(err.name === "NotAllowedError" ? "Microphone access denied — allow microphone access and try again." : (err.message || "Failed to start session."));
-      }
+      cleanupCall();
+      setCallStatus("idle");
+      setCallError(err.name === "NotAllowedError"
+        ? "Microphone access denied — allow microphone access and try again."
+        : (err.message || "Failed to start session."));
     }
   };
 
@@ -296,6 +325,70 @@ export default function VoicebotConfig({ ad }) {
     try {
       await adsAPI.deleteVoiceAgent(ad.id);
       setAgentStatus({ provisioned: false });
+    } catch (err) { alert(err.message); }
+  };
+
+  // Load campaigns once agent is provisioned; poll every 10s while any are running
+  useEffect(() => {
+    if (!agentStatus?.provisioned) return;
+    adsAPI.listVoiceCampaigns(ad.id).then((d) => setCampaigns(d?.campaigns || [])).catch(() => {});
+    const id = setInterval(() => {
+      adsAPI.listVoiceCampaigns(ad.id).then((d) => setCampaigns(d?.campaigns || [])).catch(() => {});
+    }, 10000);
+    return () => clearInterval(id);
+  }, [ad.id, agentStatus?.provisioned]);
+
+  const handleCampaignUpload = async () => {
+    if (!uploadFile || !uploadName.trim()) return;
+    setUploading(true);
+    setUploadError("");
+    try {
+      const fd = new FormData();
+      fd.append("name", uploadName.trim());
+      fd.append("file", uploadFile);
+      fd.append("concurrency", String(uploadConcurrency));
+      fd.append("per_minute", String(uploadPerMinute));
+      const data = await adsAPI.createVoiceCampaign(ad.id, fd);
+      setCampaigns((prev) => [data.campaign, ...prev]);
+      setUploadName("");
+      setUploadFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (err) {
+      setUploadError(err.message || "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleStartCampaign = async (campaignId) => {
+    try {
+      await adsAPI.startVoiceCampaign(ad.id, campaignId);
+      setCampaigns((prev) => prev.map((c) => c.id === campaignId ? { ...c, status: "running" } : c));
+    } catch (err) { alert(err.message); }
+  };
+
+  const handlePauseCampaign = async (campaignId) => {
+    try {
+      await adsAPI.pauseVoiceCampaign(ad.id, campaignId);
+      setCampaigns((prev) => prev.map((c) => c.id === campaignId ? { ...c, status: "paused" } : c));
+    } catch (err) { alert(err.message); }
+  };
+
+  const handleCancelCampaign = async (campaignId) => {
+    if (!window.confirm("Cancel this campaign? Pending calls will not be made.")) return;
+    try {
+      await adsAPI.cancelVoiceCampaign(ad.id, campaignId);
+      setCampaigns((prev) => prev.map((c) => c.id === campaignId ? { ...c, status: "cancelled" } : c));
+    } catch (err) { alert(err.message); }
+  };
+
+  const handleExpandCampaign = async (campaignId) => {
+    if (expandedCampaignId === campaignId) { setExpandedCampaignId(null); return; }
+    setExpandedCampaignId(campaignId);
+    if (campaignRecords[campaignId]) return;
+    try {
+      const data = await adsAPI.getCampaignRecords(ad.id, campaignId);
+      setCampaignRecords((prev) => ({ ...prev, [campaignId]: data?.records || [] }));
     } catch (err) { alert(err.message); }
   };
 
@@ -740,6 +833,179 @@ export default function VoicebotConfig({ ad }) {
               <p style={{ color: "var(--color-muted)", fontSize: "0.82rem" }}>No transcript available for this call.</p>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ── Bulk Calling Campaigns ──────────────────────────────────────── */}
+      {agentStatus?.provisioned && (
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--color-border)" }}>
+          <p style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-muted)", marginBottom: 10, display: "flex", alignItems: "center", gap: 5 }}>
+            <Users size={11} /> Bulk Calling Campaigns
+          </p>
+
+          {/* Upload form */}
+          <div style={{ border: "1px solid var(--color-border)", borderRadius: 10, padding: "12px 14px", background: "var(--color-bg)", marginBottom: 12 }}>
+            <p style={{ fontSize: "0.75rem", fontWeight: 600, color: "var(--color-text)", marginBottom: 8 }}>
+              Create Campaign from CSV
+            </p>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <input
+                value={uploadName}
+                onChange={(e) => setUploadName(e.target.value)}
+                placeholder="Campaign name"
+                className="field-input"
+                style={{ fontSize: "0.8rem" }}
+              />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                style={{ fontSize: "0.73rem", padding: "6px 0", color: "var(--color-text)" }}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <div>
+                <label style={{ fontSize: "0.68rem", fontWeight: 600, color: "var(--color-muted)", display: "block", marginBottom: 3 }}>
+                  Concurrent calls (max 10)
+                </label>
+                <input
+                  type="number" min={1} max={10}
+                  value={uploadConcurrency}
+                  onChange={(e) => setUploadConcurrency(Number(e.target.value))}
+                  className="field-input"
+                  style={{ fontSize: "0.8rem" }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: "0.68rem", fontWeight: 600, color: "var(--color-muted)", display: "block", marginBottom: 3 }}>
+                  Calls per minute (max 60)
+                </label>
+                <input
+                  type="number" min={1} max={60}
+                  value={uploadPerMinute}
+                  onChange={(e) => setUploadPerMinute(Number(e.target.value))}
+                  className="field-input"
+                  style={{ fontSize: "0.8rem" }}
+                />
+              </div>
+            </div>
+            <button
+              onClick={handleCampaignUpload}
+              disabled={uploading || !uploadFile || !uploadName.trim()}
+              className="btn--primary"
+              style={{ fontSize: "0.8rem", padding: "6px 14px", display: "flex", alignItems: "center", gap: 5 }}
+            >
+              {uploading
+                ? <><div className="spinner" style={{ width: 10, height: 10 }} /> Uploading…</>
+                : <><Upload size={12} /> Create Campaign</>}
+            </button>
+            {uploadError && (
+              <p style={{ marginTop: 6, fontSize: "0.75rem", color: "#ef4444", display: "flex", alignItems: "flex-start", gap: 5 }}>
+                <AlertCircle size={11} style={{ flexShrink: 0, marginTop: 1 }} />{uploadError}
+              </p>
+            )}
+            <p style={{ marginTop: 6, fontSize: "0.67rem", color: "var(--color-muted)" }}>
+              Accepts .csv, .xlsx, or .xls. Columns: <strong>phone</strong> (required, E.164 e.g. +61412345678), <strong>name</strong> (optional). Max 5 000 rows.
+            </p>
+          </div>
+
+          {/* Campaigns list */}
+          {campaigns.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {campaigns.map((campaign) => {
+                const progress = campaign.total > 0
+                  ? Math.round(((campaign.completed + campaign.failed_count) / campaign.total) * 100)
+                  : 0;
+                const statusColors = {
+                  queued: "#6b7280", running: "#3b82f6", paused: "#f59e0b",
+                  done: "#10b981", cancelled: "#9ca3af", failed: "#ef4444",
+                };
+                const color = statusColors[campaign.status] || "#6b7280";
+                const isExpanded = expandedCampaignId === campaign.id;
+
+                return (
+                  <div key={campaign.id} style={{ border: "1px solid var(--color-border)", borderRadius: 10, overflow: "hidden" }}>
+                    {/* Header row */}
+                    <div style={{ padding: "10px 12px", background: "var(--color-bg)", display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                          <span style={{ fontWeight: 600, fontSize: "0.8rem", color: "var(--color-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {campaign.name}
+                          </span>
+                          <span style={{ fontSize: "0.62rem", fontWeight: 700, padding: "1px 6px", borderRadius: 9999, background: `${color}22`, color, flexShrink: 0 }}>
+                            {campaign.status}
+                          </span>
+                        </div>
+                        {/* Progress bar */}
+                        <div style={{ height: 4, borderRadius: 2, background: "var(--color-border)", overflow: "hidden" }}>
+                          <div style={{ width: `${progress}%`, height: "100%", borderRadius: 2, background: color, transition: "width 0.4s" }} />
+                        </div>
+                        <span style={{ fontSize: "0.65rem", color: "var(--color-muted)", marginTop: 2, display: "block" }}>
+                          {campaign.completed} done · {campaign.failed_count} failed · {campaign.total} total
+                        </span>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                        {campaign.status === "queued" && (
+                          <button onClick={() => handleStartCampaign(campaign.id)} className="btn--primary" style={{ fontSize: "0.72rem", padding: "4px 10px", display: "flex", alignItems: "center", gap: 4 }}>
+                            <Play size={10} /> Start
+                          </button>
+                        )}
+                        {campaign.status === "running" && (
+                          <button onClick={() => handlePauseCampaign(campaign.id)} className="btn--inline-action--ghost" style={{ fontSize: "0.72rem", display: "flex", alignItems: "center", gap: 4 }}>
+                            <Pause size={10} /> Pause
+                          </button>
+                        )}
+                        {campaign.status === "paused" && (
+                          <button onClick={() => handleStartCampaign(campaign.id)} className="btn--primary" style={{ fontSize: "0.72rem", padding: "4px 10px", display: "flex", alignItems: "center", gap: 4 }}>
+                            <Play size={10} /> Resume
+                          </button>
+                        )}
+                        {["queued", "running", "paused"].includes(campaign.status) && (
+                          <button onClick={() => handleCancelCampaign(campaign.id)} title="Cancel campaign" style={{ background: "none", border: "none", cursor: "pointer", color: "#ef4444", padding: 4, display: "flex" }}>
+                            <StopCircle size={14} />
+                          </button>
+                        )}
+                        <button onClick={() => handleExpandCampaign(campaign.id)} className="btn--inline-action--ghost" style={{ fontSize: "0.72rem" }}>
+                          {isExpanded ? "Hide" : "Records"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Expanded records table */}
+                    {isExpanded && (
+                      <div style={{ borderTop: "1px solid var(--color-border)", maxHeight: 220, overflowY: "auto" }}>
+                        {(campaignRecords[campaign.id] || []).length === 0 ? (
+                          <p style={{ padding: "10px 12px", fontSize: "0.75rem", color: "var(--color-muted)" }}>No records loaded.</p>
+                        ) : (campaignRecords[campaign.id] || []).map((rec) => {
+                          const recColors = { pending: "#9ca3af", dialing: "#3b82f6", in_progress: "#3b82f6", completed: "#10b981", failed: "#ef4444", no_answer: "#f59e0b" };
+                          const rc = recColors[rec.status] || "#6b7280";
+                          return (
+                            <div key={rec.id} style={{ padding: "6px 12px", display: "flex", alignItems: "center", gap: 8, fontSize: "0.75rem", borderBottom: "1px solid var(--color-border)" }}>
+                              <span style={{ flex: 1, color: "var(--color-text)" }}>
+                                {rec.phone_e164}{rec.contact_name ? <span style={{ color: "var(--color-muted)", marginLeft: 6 }}>{rec.contact_name}</span> : null}
+                              </span>
+                              <span style={{ fontSize: "0.62rem", fontWeight: 700, padding: "1px 6px", borderRadius: 9999, background: `${rc}22`, color: rc, flexShrink: 0 }}>
+                                {rec.status}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {campaigns.length === 0 && (
+            <p style={{ fontSize: "0.75rem", color: "var(--color-muted)" }}>
+              No campaigns yet — upload a CSV to create one.
+            </p>
+          )}
         </div>
       )}
     </div>

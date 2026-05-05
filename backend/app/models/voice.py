@@ -4,6 +4,49 @@ from app.db.database import Base
 from app.models.base import _uuid, _now
 
 
+class CallCampaign(Base):
+    """Bulk outbound call campaign — a list of phone numbers dialled via a single ad's agent."""
+    __tablename__ = "call_campaigns"
+
+    id               = Column(String, primary_key=True, default=_uuid)
+    advertisement_id = Column(String, ForeignKey("advertisements.id"), nullable=False)
+    name             = Column(String(256), nullable=False)
+    # queued | running | paused | done | cancelled | failed
+    status           = Column(String(32), default="queued")
+    total            = Column(Integer, default=0)
+    completed        = Column(Integer, default=0)
+    failed_count     = Column(Integer, default=0)
+    concurrency      = Column(Integer, default=2)
+    per_minute       = Column(Integer, default=20)
+    created_at       = Column(DateTime, default=_now)
+    started_at       = Column(DateTime, nullable=True)
+    finished_at      = Column(DateTime, nullable=True)
+
+    advertisement = relationship("Advertisement", back_populates="call_campaigns")
+    records       = relationship("CallRecord", back_populates="campaign", cascade="all, delete-orphan")
+
+
+class CallRecord(Base):
+    """One phone number within a CallCampaign."""
+    __tablename__ = "call_records"
+
+    id               = Column(String, primary_key=True, default=_uuid)
+    campaign_id      = Column(String, ForeignKey("call_campaigns.id"), nullable=False)
+    advertisement_id = Column(String, ForeignKey("advertisements.id"), nullable=False)
+    phone_e164       = Column(String(32), nullable=False)
+    contact_name     = Column(String(256), nullable=True)
+    # pending | dialing | in_progress | completed | failed | no_answer
+    status           = Column(String(32), default="pending")
+    attempts         = Column(Integer, default=0)
+    max_attempts     = Column(Integer, default=2)
+    conversation_id  = Column(String(256), nullable=True)
+    last_error       = Column(String(512), nullable=True)
+    created_at       = Column(DateTime, default=_now)
+    called_at        = Column(DateTime, nullable=True)
+
+    campaign = relationship("CallCampaign", back_populates="records")
+
+
 class VoiceSession(Base):
     """Tracks each browser-initiated ElevenLabs voice call session."""
     __tablename__ = "voice_sessions"

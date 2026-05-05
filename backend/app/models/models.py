@@ -13,5 +13,5 @@ from app.models.skill import SkillConfig  # noqa: F401
 from app.models.advertisement import Advertisement, Review  # noqa: F401
 from app.models.analytics import AdAnalytics, OptimizerLog, ReinforcementLog  # noqa: F401
 from app.models.platform import PlatformConnection  # noqa: F401
-from app.models.voice import VoiceSession, CallTranscript, ChatSession  # noqa: F401
+from app.models.voice import VoiceSession, CallTranscript, ChatSession, CallCampaign, CallRecord  # noqa: F401
 from app.models.survey import SurveyResponse, Appointment  # noqa: F401
